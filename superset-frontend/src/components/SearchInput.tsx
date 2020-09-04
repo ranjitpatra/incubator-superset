@@ -18,6 +18,7 @@
  */
 import styled from '@superset-ui/style';
 import React from 'react';
+import Icon from 'src/components/Icon';
 
 interface Props {
   onSubmit: () => void;
@@ -44,32 +45,22 @@ const StyledInput = styled.input`
   }
 `;
 
-const SearchIcon = styled.div`
+const commonStyles = `
   position: absolute;
   z-index: 2;
   display: block;
-  width: 28px;
-  height: 28px;
-  text-align: center;
   cursor: pointer;
-  background-position: 2px 2px;
-  background-image: url('/static/assets/images/icons/search.svg');
-  background-repeat: no-repeat;
+`;
+const SearchIcon = styled(Icon)`
+  ${commonStyles}
+  top: 1px;
+  left: 2px;
 `;
 
-const ClearIcon = styled.div`
-  position: absolute;
-  z-index: 2;
-  display: block;
-  width: 28px;
-  height: 28px;
-  text-align: center;
-  cursor: pointer;
-  right: 2px;
+const ClearIcon = styled(Icon)`
+  ${commonStyles}
+  right: 0px;
   top: 1px;
-  background-position: 2px 2px;
-  background-image: url('/static/assets/images/icons/cancel-x.svg');
-  background-repeat: no-repeat;
 `;
 
 export default function SearchInput({
@@ -84,6 +75,7 @@ export default function SearchInput({
       <SearchIcon
         data-test="search-submit"
         role="button"
+        name="search"
         onClick={() => onSubmit()}
       />
       <StyledInput
@@ -102,6 +94,7 @@ export default function SearchInput({
         <ClearIcon
           data-test="search-clear"
           role="button"
+          name="cancel-x"
           onClick={() => onClear()}
         />
       )}

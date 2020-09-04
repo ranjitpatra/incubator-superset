@@ -19,7 +19,8 @@
 /* eslint-env browser */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Button, FormControl, FormGroup, Radio } from 'react-bootstrap';
+import { FormControl, FormGroup, Radio } from 'react-bootstrap';
+import Button from 'src/components/Button';
 import { CategoricalColorNamespace } from '@superset-ui/color';
 import { t } from '@superset-ui/translation';
 
@@ -32,11 +33,12 @@ const propTypes = {
   addDangerToast: PropTypes.func.isRequired,
   dashboardId: PropTypes.number.isRequired,
   dashboardTitle: PropTypes.string.isRequired,
+  dashboardInfo: PropTypes.object.isRequired,
   expandedSlices: PropTypes.object.isRequired,
   layout: PropTypes.object.isRequired,
   saveType: PropTypes.oneOf([SAVE_TYPE_OVERWRITE, SAVE_TYPE_NEWDASHBOARD]),
   triggerNode: PropTypes.node.isRequired,
-  css: PropTypes.string.isRequired,
+  customCss: PropTypes.string.isRequired,
   colorNamespace: PropTypes.string,
   colorScheme: PropTypes.string,
   onSave: PropTypes.func.isRequired,
@@ -94,13 +96,15 @@ class SaveModal extends React.PureComponent {
     const { saveType, newDashName } = this.state;
     const {
       dashboardTitle,
+      dashboardInfo,
       layout: positions,
-      css,
+      customCss,
       colorNamespace,
       colorScheme,
       expandedSlices,
       dashboardId,
-      refreshFrequency,
+      refreshFrequency: currentRefreshFrequency,
+      shouldPersistRefreshFrequency,
     } = this.props;
 
     const scale = CategoricalColorNamespace.getScale(
@@ -108,9 +112,14 @@ class SaveModal extends React.PureComponent {
       colorNamespace,
     );
     const labelColors = colorScheme ? scale.getColorMap() : {};
+    // check refresh frequency is for current session or persist
+    const refreshFrequency = shouldPersistRefreshFrequency
+      ? currentRefreshFrequency
+      : dashboardInfo.metadata.refresh_frequency; // eslint-disable camelcase
+
     const data = {
       positions,
-      css,
+      css: customCss,
       color_namespace: colorNamespace,
       color_scheme: colorScheme,
       label_colors: labelColors,
@@ -183,7 +192,7 @@ class SaveModal extends React.PureComponent {
         }
         modalFooter={
           <div>
-            <Button bsStyle="primary" onClick={this.saveDashboard}>
+            <Button buttonStyle="primary" onClick={this.saveDashboard}>
               {t('Save')}
             </Button>
           </div>

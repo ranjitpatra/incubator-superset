@@ -18,8 +18,8 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Button } from 'react-bootstrap';
-import Select from 'react-select';
+import Button from 'src/components/Button';
+import Select from 'src/components/Select';
 import { t } from '@superset-ui/translation';
 import { SupersetClient } from '@superset-ui/connection';
 
@@ -133,10 +133,10 @@ class QuerySearch extends React.PureComponent {
   }
 
   insertParams(baseUrl, params) {
-    const validParams = params.filter(function(p) {
+    const validParams = params.filter(function (p) {
       return p !== '';
     });
-    return baseUrl + '?' + validParams.join('&');
+    return `${baseUrl}?${validParams.join('&')}`;
   }
 
   changeStatus(status) {
@@ -150,7 +150,7 @@ class QuerySearch extends React.PureComponent {
 
   userLabel(user) {
     if (user.first_name && user.last_name) {
-      return user.first_name + ' ' + user.last_name;
+      return `${user.first_name} ${user.last_name}`;
     }
     return user.username;
   }
@@ -273,8 +273,8 @@ class QuerySearch extends React.PureComponent {
             />
 
             <Button
-              bsSize="small"
-              bsStyle="success"
+              buttonSize="small"
+              buttonStyle="success"
               onClick={this.refreshQueries}
             >
               {t('Search')}

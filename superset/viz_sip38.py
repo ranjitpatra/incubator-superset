@@ -20,12 +20,13 @@
 These objects represent the backend of all the visualizations that
 Superset can render.
 """
+# mypy: ignore-errors
 import copy
+import dataclasses
 import hashlib
 import inspect
 import logging
 import math
-import pickle as pkl
 import re
 import uuid
 from collections import defaultdict, OrderedDict
@@ -42,18 +43,18 @@ from dateutil import relativedelta as rdelta
 from flask import request
 from flask_babel import lazy_gettext as _
 from geopy.point import Point
-from markdown import markdown
 from pandas.tseries.frequencies import to_offset
 
-from superset import app, cache, get_manifest_files, security_manager
+from superset import app, cache, security_manager
 from superset.constants import NULL_STRING
+from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
     NullValueException,
     QueryObjectValidationError,
     SpatialException,
 )
 from superset.models.helpers import QueryResult
-from superset.typing import VizData
+from superset.typing import QueryObjectDict, VizData, VizPayload
 from superset.utils import core as utils
 from superset.utils.core import (
     DTTM_ALIAS,
@@ -61,6 +62,7 @@ from superset.utils.core import (
     merge_extra_filters,
     to_adhoc,
 )
+from superset.viz import set_and_log_cache
 
 if TYPE_CHECKING:
     from superset.connectors.base.models import BaseDatasource
@@ -161,7 +163,7 @@ class BaseViz:
         self.status: Optional[str] = None
         self.error_msg = ""
         self.results: Optional[QueryResult] = None
-        self.error_message: Optional[str] = None
+        self.errors: List[Dict[str, Any]] = []
         self.force = force
         self.from_ddtm: Optional[datetime] = None
         self.to_dttm: Optional[datetime] = None
@@ -248,7 +250,7 @@ class BaseViz:
             df = df[min_periods:]
         return df
 
-    def get_samples(self):
+    def get_samples(self) -> List[Dict[str, Any]]:
         query_obj = self.query_obj()
         query_obj.update(
             {
@@ -279,7 +281,7 @@ class BaseViz:
         self.results = self.datasource.query(query_obj)
         self.query = self.results.query
         self.status = self.results.status
-        self.error_message = self.results.error_message
+        self.errors = self.results.errors
 
         df = self.results.df
         # Transform the timestamp we received from database to pandas supported
@@ -449,7 +451,7 @@ class BaseViz:
         json_data = self.json_dumps(cache_dict, sort_keys=True)
         return hashlib.md5(json_data.encode("utf-8")).hexdigest()
 
-    def get_payload(self, query_obj=None):
+    def get_payload(self, query_obj: Optional[QueryObjectDict] = None) -> VizPayload:
         """Returns a payload of metadata and data"""
         self.run_extra_queries()
         payload = self.get_df_payload(query_obj)
@@ -461,7 +463,9 @@ class BaseViz:
             del payload["df"]
         return payload
 
-    def get_df_payload(self, query_obj=None, **kwargs):
+    def get_df_payload(
+        self, query_obj: Optional[QueryObjectDict] = None, **kwargs: Any
+    ) -> Dict[str, Any]:
         """Handles caching around the df payload retrieval"""
         if not query_obj:
             query_obj = self.query_obj()
@@ -476,7 +480,6 @@ class BaseViz:
             if cache_value:
                 stats_logger.incr("loading_from_cache")
                 try:
-                    cache_value = pkl.loads(cache_value)
                     df = cache_value["df"]
                     self.query = cache_value["query"]
                     self._any_cached_dttm = cache_value["dttm"]
@@ -501,8 +504,14 @@ class BaseViz:
                     is_loaded = True
             except Exception as ex:
                 logger.exception(ex)
-                if not self.error_message:
-                    self.error_message = "{}".format(ex)
+                error = dataclasses.asdict(
+                    SupersetError(
+                        message=str(ex),
+                        level=ErrorLevel.ERROR,
+                        error_type=SupersetErrorType.VIZ_GET_DF_ERROR,
+                    )
+                )
+                self.errors.append(error)
                 self.status = utils.QueryStatus.FAILED
                 stacktrace = utils.get_stacktrace()
 
@@ -512,29 +521,21 @@ class BaseViz:
                 and cache
                 and self.status != utils.QueryStatus.FAILED
             ):
-                try:
-                    cache_value = dict(dttm=cached_dttm, df=df, query=self.query)
-                    cache_value = pkl.dumps(cache_value, protocol=pkl.HIGHEST_PROTOCOL)
-
-                    logger.info(
-                        "Caching {} chars at key {}".format(len(cache_value), cache_key)
-                    )
-
-                    stats_logger.incr("set_cache_key")
-                    cache.set(cache_key, cache_value, timeout=self.cache_timeout)
-                except Exception as ex:
-                    # cache.set call can fail if the backend is down or if
-                    # the key is too large or whatever other reasons
-                    logger.warning("Could not cache key {}".format(cache_key))
-                    logger.exception(ex)
-                    cache.delete(cache_key)
+                set_and_log_cache(
+                    cache_key,
+                    df,
+                    self.query,
+                    cached_dttm,
+                    self.cache_timeout,
+                    self.datasource.uid,
+                )
 
         return {
             "cache_key": self._any_cache_key,
             "cached_dttm": self._any_cached_dttm,
             "cache_timeout": self.cache_timeout,
             "df": df,
-            "error": self.error_message,
+            "errors": self.errors,
             "form_data": self.form_data,
             "is_cached": self._any_cache_key is not None,
             "query": self.query,
@@ -550,10 +551,11 @@ class BaseViz:
             obj, default=utils.json_int_dttm_ser, ignore_nan=True, sort_keys=sort_keys
         )
 
-    def payload_json_and_has_error(self, payload):
+    def payload_json_and_has_error(self, payload: VizPayload) -> Tuple[str, bool]:
         has_error = (
             payload.get("status") == utils.QueryStatus.FAILED
             or payload.get("error") is not None
+            or len(payload.get("errors", [])) > 0
         )
         return self.json_dumps(payload), has_error
 
@@ -568,7 +570,7 @@ class BaseViz:
         }
         return content
 
-    def get_csv(self):
+    def get_csv(self) -> Optional[str]:
         df = self.get_df()
         include_index = not isinstance(df.index, pd.RangeIndex)
         return df.to_csv(index=include_index, **config["CSV_EXPORT"])
@@ -579,6 +581,15 @@ class BaseViz:
     @property
     def json_data(self):
         return json.dumps(self.data)
+
+    def raise_for_access(self) -> None:
+        """
+        Raise an exception if the user cannot access the resource.
+
+        :raises SupersetSecurityException: If the user cannot access the resource
+        """
+
+        security_manager.raise_for_access(viz=self)
 
 
 class TableViz(BaseViz):
@@ -601,7 +612,7 @@ class TableViz(BaseViz):
             raise QueryObjectValidationError(
                 _("Pick a granularity in the Time section or " "uncheck 'Include Time'")
             )
-        return fd.get("include_time")
+        return bool(fd.get("include_time"))
 
     def query_obj(self):
         d = super().query_obj()
@@ -666,12 +677,6 @@ class TableViz(BaseViz):
         non_percent_metric_columns.extend(
             utils.get_metric_names(self.form_data.get("metrics") or [])
         )
-
-        timeseries_limit_metric = utils.get_metric_name(
-            self.form_data.get("timeseries_limit_metric")
-        )
-        if timeseries_limit_metric:
-            non_percent_metric_columns.append(timeseries_limit_metric)
 
         percent_metric_columns = utils.get_metric_names(
             self.form_data.get("percent_metrics") or []
@@ -824,49 +829,6 @@ class PivotTableViz(BaseViz):
                 ).split(" "),
             ),
         )
-
-
-class MarkupViz(BaseViz):
-
-    """Use html or markdown to create a free form widget"""
-
-    viz_type = "markup"
-    verbose_name = _("Markup")
-    is_timeseries = False
-
-    def query_obj(self):
-        return None
-
-    def get_df(self, query_obj: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-        return pd.DataFrame()
-
-    def get_data(self, df: pd.DataFrame) -> VizData:
-        markup_type = self.form_data.get("markup_type")
-        code = self.form_data.get("code", "")
-        if markup_type == "markdown":
-            code = markdown(code)
-        return dict(html=code, theme_css=get_manifest_files("theme", "css"))
-
-
-class SeparatorViz(MarkupViz):
-
-    """Use to create section headers in a dashboard, similar to `Markup`"""
-
-    viz_type = "separator"
-    verbose_name = _("Separator")
-
-
-class WordCloudViz(BaseViz):
-
-    """Build a colorful word cloud
-
-    Uses the nice library at:
-    https://github.com/jasondavies/d3-cloud
-    """
-
-    viz_type = "word_cloud"
-    verbose_name = _("Word Cloud")
-    is_timeseries = False
 
 
 class TreemapViz(BaseViz):
@@ -1074,9 +1036,9 @@ class BubbleViz(NVD3Viz):
         form_data = self.form_data
         d = super().query_obj()
 
-        self.x_metric = form_data.get("x")
-        self.y_metric = form_data.get("y")
-        self.z_metric = form_data.get("size")
+        self.x_metric = form_data["x"]
+        self.y_metric = form_data["y"]
+        self.z_metric = form_data["size"]
         self.entity = form_data.get("entity")
         self.series = form_data.get("series") or self.entity
         d["row_limit"] = form_data.get("limit")
@@ -1120,20 +1082,6 @@ class BulletViz(NVD3Viz):
         d = super().query_obj()
         self.metric = form_data.get("metric")
 
-        def as_strings(field):
-            value = form_data.get(field)
-            return value.split(",") if value else []
-
-        def as_floats(field):
-            return [float(x) for x in as_strings(field)]
-
-        self.ranges = as_floats("ranges")
-        self.range_labels = as_strings("range_labels")
-        self.markers = as_floats("markers")
-        self.marker_labels = as_strings("marker_labels")
-        self.marker_lines = as_floats("marker_lines")
-        self.marker_line_labels = as_strings("marker_line_labels")
-
         d["metrics"] = [self.metric]
         if not self.metric:
             raise QueryObjectValidationError(_("Pick a metric to display"))
@@ -1144,12 +1092,6 @@ class BulletViz(NVD3Viz):
         values = df["metric"].values
         return {
             "measures": values.tolist(),
-            "ranges": self.ranges or [0, values.max() * 1.1],
-            "rangeLabels": self.range_labels or None,
-            "markers": self.markers or None,
-            "markerLabels": self.marker_labels or None,
-            "markerLines": self.marker_lines or None,
-            "markerLineLabels": self.marker_line_labels or None,
         }
 
 
@@ -1412,8 +1354,8 @@ class MultiLineViz(NVD3Viz):
     def get_data(self, df: pd.DataFrame) -> VizData:
         fd = self.form_data
         # Late imports to avoid circular import issues
-        from superset.models.slice import Slice
         from superset import db
+        from superset.models.slice import Slice
 
         slice_ids1 = fd.get("line_charts")
         slices1 = db.session.query(Slice).filter(Slice.id.in_(slice_ids1)).all()
@@ -1493,8 +1435,8 @@ class NVD3DualLineViz(NVD3Viz):
                 _("Pick a time granularity for your time series")
             )
 
-        metric = utils.get_metric_name(fd.get("metric"))
-        metric_2 = utils.get_metric_name(fd.get("metric_2"))
+        metric = utils.get_metric_name(fd["metric"])
+        metric_2 = utils.get_metric_name(fd["metric_2"])
         df = df.pivot_table(index=DTTM_ALIAS, values=[metric, metric_2])
 
         chart_data = self.to_series(df)
@@ -1549,7 +1491,7 @@ class NVD3TimePivotViz(NVD3TimeSeriesViz):
         df = df.pivot_table(
             index=DTTM_ALIAS,
             columns="series",
-            values=utils.get_metric_name(fd.get("metric")),
+            values=utils.get_metric_name(fd["metric"]),
         )
         chart_data = self.to_series(df)
         for serie in chart_data:
@@ -1727,8 +1669,12 @@ class SunburstViz(BaseViz):
         fd = self.form_data
         cols = fd.get("groupby") or []
         cols.extend(["m1", "m2"])
-        metric = utils.get_metric_name(fd.get("metric"))
-        secondary_metric = utils.get_metric_name(fd.get("secondary_metric"))
+        metric = utils.get_metric_name(fd["metric"])
+        secondary_metric = (
+            utils.get_metric_name(fd["secondary_metric"])
+            if "secondary_metric" in fd
+            else None
+        )
         if metric == secondary_metric or secondary_metric is None:
             df.rename(columns={df.columns[-1]: "m1"}, inplace=True)
             df["m2"] = df["m1"]
@@ -1885,8 +1831,12 @@ class WorldMapViz(BaseViz):
 
         fd = self.form_data
         cols = [fd.get("entity")]
-        metric = utils.get_metric_name(fd.get("metric"))
-        secondary_metric = utils.get_metric_name(fd.get("secondary_metric"))
+        metric = utils.get_metric_name(fd["metric"])
+        secondary_metric = (
+            utils.get_metric_name(fd["secondary_metric"])
+            if "secondary_metric" in fd
+            else None
+        )
         columns = ["country", "m1", "m2"]
         if metric == secondary_metric:
             ndf = df[cols]
@@ -2222,8 +2172,8 @@ class DeckGLMultiLayer(BaseViz):
     def get_data(self, df: pd.DataFrame) -> VizData:
         fd = self.form_data
         # Late imports to avoid circular import issues
-        from superset.models.slice import Slice
         from superset import db
+        from superset.models.slice import Slice
 
         slice_ids = fd.get("deck_slices")
         slices = db.session.query(Slice).filter(Slice.id.in_(slice_ids)).all()
@@ -2871,6 +2821,6 @@ viz_types = {
     if (
         inspect.isclass(o)
         and issubclass(o, BaseViz)
-        and o.viz_type not in config["VIZ_TYPE_BLACKLIST"]
+        and o.viz_type not in config["VIZ_TYPE_DENYLIST"]
     )
 }

@@ -26,9 +26,10 @@ import {
 } from 'react-bootstrap';
 import { connect } from 'react-redux';
 import { t } from '@superset-ui/translation';
+import { withTheme } from '@superset-ui/style';
+import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 import { getChartKey } from '../../exploreUtils';
 import { runAnnotationQuery } from '../../../chart/chartAction';
-import InfoTooltipWithTrigger from '../../../components/InfoTooltipWithTrigger';
 
 import AnnotationLayer from './AnnotationLayer';
 
@@ -100,6 +101,7 @@ class AnnotationLayerControl extends React.PureComponent {
 
   renderPopover(parent, annotation, error) {
     const id = !annotation ? '_new' : annotation.name;
+    const { theme } = this.props;
     return (
       <Popover
         style={{ maxWidth: 'none' }}
@@ -116,6 +118,7 @@ class AnnotationLayerControl extends React.PureComponent {
           addAnnotationLayer={this.addAnnotationLayer}
           removeAnnotationLayer={this.removeAnnotationLayer}
           close={() => this.refs[parent].hide()}
+          theme={theme}
         />
       </Popover>
     );
@@ -208,7 +211,9 @@ function mapDispatchToProps(dispatch) {
   };
 }
 
+const themedAnnotationLayerControl = withTheme(AnnotationLayerControl);
+
 export default connect(
   mapStateToProps,
   mapDispatchToProps,
-)(AnnotationLayerControl);
+)(themedAnnotationLayerControl);

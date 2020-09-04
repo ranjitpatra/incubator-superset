@@ -17,7 +17,6 @@
  * under the License.
  */
 import { FORM_DATA_DEFAULTS, NUM_METRIC } from './visualizations/shared.helper';
-import readResponseBlob from '../../utils/readResponseBlob';
 
 describe('No Results', () => {
   beforeEach(() => {
@@ -26,7 +25,7 @@ describe('No Results', () => {
     cy.route('POST', '/superset/explore_json/**').as('getJson');
   });
 
-  it('No results  message shows up', () => {
+  it('No results message shows up', () => {
     const formData = {
       ...FORM_DATA_DEFAULTS,
       metrics: [NUM_METRIC],
@@ -39,7 +38,6 @@ describe('No Results', () => {
           comparator: ['Fake State'],
           clause: 'WHERE',
           sqlExpression: null,
-          fromFormData: true,
         },
       ],
     };

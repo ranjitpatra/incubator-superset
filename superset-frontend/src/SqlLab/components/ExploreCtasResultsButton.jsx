@@ -22,11 +22,11 @@ import { bindActionCreators } from 'redux';
 import { connect } from 'react-redux';
 import Dialog from 'react-bootstrap-dialog';
 import { t } from '@superset-ui/translation';
+import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 
-import { exportChart } from '../../explore/exploreUtils';
+import Button from 'src/components/Button';
+import { exploreChart } from '../../explore/exploreUtils';
 import * as actions from '../actions/sqlLab';
-import InfoTooltipWithTrigger from '../../components/InfoTooltipWithTrigger';
-import Button from '../../components/Button';
 
 const propTypes = {
   actions: PropTypes.object.isRequired,
@@ -36,6 +36,7 @@ const propTypes = {
   errorMessage: PropTypes.string,
   templateParams: PropTypes.string,
 };
+
 const defaultProps = {
   vizRequest: {},
 };
@@ -76,7 +77,7 @@ class ExploreCtasResultsButton extends React.PureComponent {
         );
 
         // open new window for data visualization
-        exportChart(formData);
+        exploreChart(formData);
       })
       .catch(() => {
         this.props.actions.addDangerToast(
@@ -88,7 +89,7 @@ class ExploreCtasResultsButton extends React.PureComponent {
     return (
       <>
         <Button
-          bsSize="small"
+          buttonSize="small"
           onClick={this.onClick}
           tooltip={t('Explore the result set in the data exploration view')}
         >

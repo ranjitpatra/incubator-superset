@@ -27,10 +27,10 @@ import 'brace/mode/markdown';
 import 'brace/theme/textmate';
 
 import { t } from '@superset-ui/translation';
+import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 
+import Button from 'src/components/Button';
 import ModalTrigger from '../../components/ModalTrigger';
-import InfoTooltipWithTrigger from '../../components/InfoTooltipWithTrigger';
-import Button from '../../components/Button';
 
 const propTypes = {
   onChange: PropTypes.func,

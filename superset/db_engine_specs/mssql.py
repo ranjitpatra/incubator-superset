@@ -19,10 +19,10 @@ import re
 from datetime import datetime
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
-from sqlalchemy.types import String, TypeEngine, UnicodeText
+from sqlalchemy.types import String, UnicodeText
 
 from superset.db_engine_specs.base import BaseEngineSpec, LimitMethod
-from superset.sql_parse import ParsedQuery
+from superset.utils import core as utils
 
 if TYPE_CHECKING:
     from superset.models.core import Database  # pylint: disable=unused-import
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 class MssqlEngineSpec(BaseEngineSpec):
     engine = "mssql"
+    engine_name = "Microsoft SQL"
     limit_method = LimitMethod.WRAP_SQL
     max_column_name_length = 128
 
@@ -58,33 +59,32 @@ class MssqlEngineSpec(BaseEngineSpec):
     @classmethod
     def convert_dttm(cls, target_type: str, dttm: datetime) -> Optional[str]:
         tt = target_type.upper()
-        if tt == "DATE":
+        if tt == utils.TemporalType.DATE:
             return f"CONVERT(DATE, '{dttm.date().isoformat()}', 23)"
-        if tt == "DATETIME":
+        if tt == utils.TemporalType.DATETIME:
             return f"""CONVERT(DATETIME, '{dttm.isoformat(timespec="milliseconds")}', 126)"""  # pylint: disable=line-too-long
-        if tt == "SMALLDATETIME":
+        if tt == utils.TemporalType.SMALLDATETIME:
             return f"""CONVERT(SMALLDATETIME, '{dttm.isoformat(sep=" ", timespec="seconds")}', 20)"""  # pylint: disable=line-too-long
         return None
 
     @classmethod
-    def fetch_data(cls, cursor: Any, limit: int) -> List[Tuple]:
+    def fetch_data(
+        cls, cursor: Any, limit: Optional[int] = None
+    ) -> List[Tuple[Any, ...]]:
         data = super().fetch_data(cursor, limit)
         # Lists of `pyodbc.Row` need to be unpacked further
         return cls.pyodbc_rows_to_tuples(data)
 
-    column_types = (
-        (String(), re.compile(r"^(?<!N)((VAR){0,1}CHAR|TEXT|STRING)", re.IGNORECASE)),
-        (UnicodeText(), re.compile(r"^N((VAR){0,1}CHAR|TEXT)", re.IGNORECASE)),
+    column_type_mappings = (
+        (re.compile(r"^N((VAR)?CHAR|TEXT)", re.IGNORECASE), UnicodeText()),
+        (re.compile(r"^((VAR)?CHAR|TEXT|STRING)", re.IGNORECASE), String()),
     )
 
     @classmethod
-    def get_sqla_column_type(cls, type_: str) -> Optional[TypeEngine]:
-        for sqla_type, regex in cls.column_types:
-            if regex.match(type_):
-                return sqla_type
-        return None
-
-    @classmethod
-    def apply_limit_to_sql(cls, sql: str, limit: int, database: "Database") -> str:
-        new_sql = ParsedQuery(sql).set_alias()
-        return super().apply_limit_to_sql(new_sql, limit, database)
+    def extract_error_message(cls, ex: Exception) -> str:
+        if str(ex).startswith("(8155,"):
+            return (
+                f"{cls.engine} error: All your SQL functions need to "
+                "have an alias on MSSQL. For example: SELECT COUNT(*) AS C1 FROM TABLE1"
+            )
+        return f"{cls.engine} error: {cls._extract_error_message(ex)}"

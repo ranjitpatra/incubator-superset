@@ -34,7 +34,7 @@ module.exports = {
       rules: {
         'import/no-unresolved': 0,
         'global-require': 0,
-      }
+      },
     },
     {
       files: ['*.ts', '*.tsx'],
@@ -76,7 +76,6 @@ module.exports = {
         indent: 0,
         'jsx-a11y/anchor-has-content': 0,
         'jsx-a11y/href-no-hash': 0,
-        'jsx-a11y/no-static-element-interactions': 0,
         'new-cap': 0,
         'no-bitwise': 0,
         'no-confusing-arrow': 0,
@@ -88,10 +87,20 @@ module.exports = {
         'no-prototype-builtins': 0,
         'no-restricted-properties': 0,
         'no-restricted-syntax': 0,
-        'no-unused-vars': 0,
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [
+              {
+                name: 'antd',
+                message:
+                  'Please import Ant components from the index of common/components',
+              },
+            ],
+          },
+        ],
         'padded-blocks': 0,
         'prefer-arrow-callback': 0,
-        'prefer-template': 0,
         'react/forbid-prop-types': 0,
         'react/jsx-filename-extension': [1, { extensions: ['.jsx', '.tsx'] }],
         'react/jsx-no-bind': 0,
@@ -109,6 +118,38 @@ module.exports = {
         react: {
           version: 'detect',
         },
+      },
+    },
+    {
+      files: ['*.stories.jsx', '*.stories.tsx'],
+      rules: {
+        // this is to keep eslint from complaining about storybook addons,
+        // since they are included as dev dependencies rather than direct dependencies.
+        'import/no-extraneous-dependencies': [
+          'error',
+          { devDependencies: true },
+        ],
+      },
+    },
+    {
+      files: [
+        'src/**/*.test.ts',
+        'src/**/*.test.tsx',
+        'src/**/*.test.js',
+        'src/**/*.test.jsx',
+      ],
+      plugins: ['jest', 'no-only-tests'],
+      env: {
+        'jest/globals': true,
+      },
+      extends: ['plugin:jest/recommended'],
+      rules: {
+        'import/no-extraneous-dependencies': [
+          'error',
+          { devDependencies: true },
+        ],
+        'jest/consistent-test-it': 'error',
+        'no-only-tests/no-only-tests': 'error',
       },
     },
   ],
@@ -138,7 +179,6 @@ module.exports = {
     indent: 0,
     'jsx-a11y/anchor-has-content': 0,
     'jsx-a11y/href-no-hash': 0,
-    'jsx-a11y/no-static-element-interactions': 0,
     'new-cap': 0,
     'no-bitwise': 0,
     'no-confusing-arrow': 0,
@@ -150,11 +190,21 @@ module.exports = {
     'no-prototype-builtins': 0,
     'no-restricted-properties': 0,
     'no-restricted-syntax': 0,
-    'no-unused-vars': 0,
+    'no-restricted-imports': [
+      'error',
+      {
+        paths: [
+          {
+            name: 'antd',
+            message:
+              'Please import Ant components from the index of common/components',
+          },
+        ],
+      },
+    ],
     'padded-blocks': 0,
     'prefer-arrow-callback': 0,
     'prefer-object-spread': 1,
-    'prefer-template': 0,
     'react/forbid-prop-types': 0,
     'react/jsx-filename-extension': [1, { extensions: ['.jsx', '.tsx'] }],
     'react/jsx-no-bind': 0,

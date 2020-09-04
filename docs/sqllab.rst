@@ -73,21 +73,19 @@ Superset's Jinja context:
 
 - ``time``: ``time``
 - ``datetime``: ``datetime.datetime``
-- ``uuid``: ``uuid``
+- ``uuid1``: ``uuid1``
+- ``uuid3``: ``uuid3``
+- ``uuid4``: ``uuid4``
+- ``uuid5``: ``uuid5``
 - ``random``: ``random``
 - ``relativedelta``: ``dateutil.relativedelta.relativedelta``
 
 `Jinja's builtin filters <http://jinja.pocoo.org/docs/dev/templates/>`_ can be also be applied where needed.
 
-.. autofunction:: superset.jinja_context.ExtraCache.current_user_id
-
-.. autofunction:: superset.jinja_context.ExtraCache.current_username
-
-.. autofunction:: superset.jinja_context.ExtraCache.url_param
+.. autoclass:: superset.jinja_context.ExtraCache
+    :members:
 
 .. autofunction:: superset.jinja_context.filter_values
-
-.. autofunction:: superset.jinja_context.ExtraCache.cache_key_wrapper
 
 .. autoclass:: superset.jinja_context.PrestoTemplateProcessor
     :members:
