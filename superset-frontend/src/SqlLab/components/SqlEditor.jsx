@@ -28,7 +28,7 @@ import {
   Tooltip,
 } from 'react-bootstrap';
 import Split from 'react-split';
-import { t } from '@superset-ui/translation';
+import { t } from '@superset-ui/core';
 import debounce from 'lodash/debounce';
 import throttle from 'lodash/throttle';
 
@@ -534,6 +534,7 @@ class SqlEditor extends React.PureComponent {
         <div className="rightItems">
           <Button
             className="autocomplete"
+            buttonSize="small"
             onClick={this.handleToggleAutocompleteEnabled}
           >
             <Checkbox checked={this.state.autocompleteEnabled} />{' '}
