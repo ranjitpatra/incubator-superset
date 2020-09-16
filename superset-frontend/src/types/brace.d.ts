@@ -16,28 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { t } from '@superset-ui/core';
-
-export const commonMenuData = {
-  name: t('Data'),
-  children: [
-    {
-      name: 'Datasets',
-      label: t('Datasets'),
-      url: '/tablemodelview/list/',
-      usesRouter: true,
-    },
-    {
-      name: 'Databases',
-      label: t('Databases'),
-      url: '/databaseview/list/',
-      usesRouter: true,
-    },
-    {
-      name: 'Saved Queries',
-      label: t('Saved Queries'),
-      url: '/sqllab/my_queries/',
-      usesRouter: false,
-    },
-  ],
-};
+declare module 'brace/mode/sql';
+declare module 'brace/mode/markdown';
+declare module 'brace/mode/json';
+declare module 'brace/mode/css';
+declare module 'brace/mode/html';
+declare module 'brace/mode/yaml';
+declare module 'brace/mode/javascript';
+declare module 'brace/theme/textmate';
+declare module 'brace/theme/github';
+declare module 'brace/ext/language_tools';

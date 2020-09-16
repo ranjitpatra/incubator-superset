@@ -14,31 +14,3 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from flask import Flask
-from flask_caching import Cache
-
-
-class CacheManager:
-    def __init__(self) -> None:
-        super().__init__()
-
-        self._cache = Cache()
-        self._tables_cache = Cache()
-        self._thumbnail_cache = Cache()
-
-    def init_app(self, app: Flask) -> None:
-        self._cache.init_app(app, app.config["CACHE_CONFIG"])
-        self._tables_cache.init_app(app, app.config["TABLE_NAMES_CACHE_CONFIG"])
-        self._thumbnail_cache.init_app(app, app.config["THUMBNAIL_CACHE_CONFIG"])
-
-    @property
-    def tables_cache(self) -> Cache:
-        return self._tables_cache
-
-    @property
-    def cache(self) -> Cache:
-        return self._cache
-
-    @property
-    def thumbnail_cache(self) -> Cache:
-        return self._thumbnail_cache
