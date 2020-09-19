@@ -86,7 +86,6 @@ module.exports = {
             '.json': 'always',
           },
         ],
-        'import/no-named-as-default': 0,
         'import/no-named-as-default-member': 0,
         'import/prefer-default-export': 0,
         indent: 0,
@@ -101,7 +100,6 @@ module.exports = {
         'no-multi-spaces': 0,
         'no-prototype-builtins': 0,
         'no-restricted-properties': 0,
-        'no-restricted-syntax': 0,
         'no-restricted-imports': [
           'error',
           {
@@ -201,7 +199,6 @@ module.exports = {
       },
     ],
     'import/no-cycle': 0, // re-enable up for discussion, might require some major refactors
-    'import/no-named-as-default': 0,
     'import/prefer-default-export': 0,
     indent: 0,
     'jsx-a11y/anchor-is-valid': 0, // disabled temporarily
@@ -215,7 +212,6 @@ module.exports = {
     'no-multi-spaces': 0,
     'no-prototype-builtins': 0,
     'no-restricted-properties': 0,
-    'no-restricted-syntax': 0,
     'no-restricted-imports': [
       'error',
       {
