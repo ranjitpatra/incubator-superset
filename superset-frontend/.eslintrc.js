@@ -17,7 +17,12 @@
  * under the License.
  */
 module.exports = {
-  extends: ['airbnb', 'prettier', 'prettier/react'],
+  extends: [
+    'airbnb',
+    'prettier',
+    'prettier/react',
+    'plugin:react-hooks/recommended',
+  ],
   parser: 'babel-eslint',
   parserOptions: {
     ecmaFeatures: {
@@ -124,7 +129,6 @@ module.exports = {
         'react/jsx-fragments': 1,
         'react/jsx-no-bind': 0,
         'react/jsx-props-no-spreading': 0, // re-enable up for discussion
-        'react/no-access-state-in-setstate': 0, // disabled temporarily
         'react/no-array-index-key': 0,
         'react/no-string-refs': 0,
         'react/no-unescaped-entities': 0,
@@ -236,7 +240,6 @@ module.exports = {
     'react/jsx-fragments': 1,
     'react/jsx-no-bind': 0,
     'react/jsx-props-no-spreading': 0, // re-enable up for discussion
-    'react/no-access-state-in-setstate': 0, // disabled temporarily
     'react/no-array-index-key': 0,
     'react/no-string-refs': 0,
     'react/no-unescaped-entities': 0,
