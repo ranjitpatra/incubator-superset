@@ -135,6 +135,7 @@ export class UnwrappedDragDroppable extends React.Component {
       <div
         style={style}
         ref={this.setRef}
+        data-test="dragdroppable-object"
         className={cx(
           'dragdroppable',
           orientation === 'row' && 'dragdroppable-row',
@@ -154,6 +155,6 @@ UnwrappedDragDroppable.defaultProps = defaultProps;
 
 // note that the composition order here determines using
 // component.method() vs decoratedComponentInstance.method() in the drag/drop config
-export default DropTarget(...dropConfig)(
-  DragSource(...dragConfig)(UnwrappedDragDroppable),
+export default DragSource(...dragConfig)(
+  DropTarget(...dropConfig)(UnwrappedDragDroppable),
 );

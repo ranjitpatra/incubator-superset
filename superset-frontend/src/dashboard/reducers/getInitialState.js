@@ -22,6 +22,7 @@ import shortid from 'shortid';
 import { CategoricalColorNamespace } from '@superset-ui/core';
 
 import { initSliceEntities } from 'src/dashboard/reducers/sliceEntities';
+import { getInitialState as getInitialNativeFilterState } from 'src/dashboard/reducers/nativeFilters';
 import { getParam } from 'src/modules/utils';
 import { applyDefaultFormData } from 'src/explore/store';
 import { buildActiveFilters } from 'src/dashboard/util/activeDashboardFilters';
@@ -40,7 +41,6 @@ import {
   CHART_TYPE,
   ROW_TYPE,
 } from '../util/componentTypes';
-import { buildFilterColorMap } from '../util/dashboardFiltersColorMap';
 import findFirstParentContainerId from '../util/findFirstParentContainer';
 import getEmptyLayout from '../util/getEmptyLayout';
 import getFilterConfigsFromFormdata from '../util/getFilterConfigsFromFormdata';
@@ -127,7 +127,6 @@ export default function getInitialState(bootstrapData) {
       slice_url: slice.slice_url,
       slice_name: slice.slice_name,
       form_data: slice.form_data,
-      edit_url: slice.edit_url,
       viz_type: slice.form_data.viz_type,
       datasource: slice.form_data.datasource,
       description: slice.description,
@@ -169,7 +168,10 @@ export default function getInitialState(bootstrapData) {
     }
 
     // build DashboardFilters for interactive filter features
-    if (slice.form_data.viz_type === 'filter_box') {
+    if (
+      slice.form_data.viz_type === 'filter_box' ||
+      slice.form_data.viz_type === 'filter_select'
+    ) {
       const configs = getFilterConfigsFromFormdata(slice.form_data);
       let { columns } = configs;
       const { labels } = configs;
@@ -232,7 +234,6 @@ export default function getInitialState(bootstrapData) {
     dashboardFilters,
     components: layout,
   });
-  buildFilterColorMap(dashboardFilters, layout);
 
   // store the header as a layout component so we can undo/redo changes
   layout[DASHBOARD_HEADER_ID] = {
@@ -257,6 +258,11 @@ export default function getInitialState(bootstrapData) {
     directPathToChild.push(directLinkComponentId);
   }
 
+  const nativeFilters = getInitialNativeFilterState({
+    filterConfig: dashboard.metadata.filter_configuration || [],
+    filterSetsConfig: dashboard.metadata.filter_sets_configuration || [],
+  });
+
   return {
     datasources,
     sliceEntities: { ...initSliceEntities, slices, isLoading: false },
@@ -276,18 +282,15 @@ export default function getInitialState(bootstrapData) {
         flash_messages: common.flash_messages,
         conf: common.conf,
       },
+      lastModifiedTime: dashboard.last_modified_time,
     },
     dashboardFilters,
+    nativeFilters,
     dashboardState: {
       sliceIds: Array.from(sliceIds),
       directPathToChild,
       directPathLastUpdated: Date.now(),
-      // dashboard only has 1 focused filter field at a time,
-      // but when user switch different filter boxes,
-      // browser didn't always fire onBlur and onFocus events in order.
-      // so in redux state focusedFilterField prop is a queue,
-      // but component use focusedFilterField prop as single object.
-      focusedFilterField: [],
+      focusedFilterField: null,
       expandedSlices: dashboard.metadata.expanded_slices || {},
       refreshFrequency: dashboard.metadata.refresh_frequency || 0,
       // dashboard viewers can set refresh frequency for the current visit,
@@ -300,6 +303,7 @@ export default function getInitialState(bootstrapData) {
       isPublished: dashboard.published,
       hasUnsavedChanges: false,
       maxUndoHistoryExceeded: false,
+      lastModifiedTime: dashboard.last_modified_time,
     },
     dashboardLayout,
     messageToasts: [],

@@ -19,9 +19,9 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import moment from 'moment';
-import { Dropdown, MenuItem } from 'react-bootstrap';
-import { t } from '@superset-ui/core';
-import URLShortLinkModal from '../../components/URLShortLinkModal';
+import { styled, t } from '@superset-ui/core';
+import { Menu, NoAnimationDropdown } from 'src/common/components';
+import ShareMenuItems from 'src/dashboard/components/menu/ShareMenuItems';
 import downloadAsImage from '../../utils/downloadAsImage';
 import getDashboardUrl from '../util/getDashboardUrl';
 import { getActiveFilters } from '../util/activeDashboardFilters';
@@ -31,9 +31,9 @@ const propTypes = {
   componentId: PropTypes.string.isRequired,
   dashboardId: PropTypes.number.isRequired,
   addDangerToast: PropTypes.func.isRequired,
-  isCached: PropTypes.bool,
+  isCached: PropTypes.arrayOf(PropTypes.bool),
+  cachedDttm: PropTypes.arrayOf(PropTypes.string),
   isExpanded: PropTypes.bool,
-  cachedDttm: PropTypes.string,
   updatedDttm: PropTypes.number,
   supersetCanExplore: PropTypes.bool,
   supersetCanCSV: PropTypes.bool,
@@ -49,48 +49,69 @@ const defaultProps = {
   toggleExpandSlice: () => ({}),
   exploreChart: () => ({}),
   exportCSV: () => ({}),
-  cachedDttm: null,
+  cachedDttm: [],
   updatedDttm: null,
-  isCached: false,
+  isCached: [],
   isExpanded: false,
   supersetCanExplore: false,
   supersetCanCSV: false,
   sliceCanEdit: false,
 };
 
+const MENU_KEYS = {
+  FORCE_REFRESH: 'force_refresh',
+  TOGGLE_CHART_DESCRIPTION: 'toggle_chart_description',
+  EXPLORE_CHART: 'explore_chart',
+  EXPORT_CSV: 'export_csv',
+  RESIZE_LABEL: 'resize_label',
+  SHARE_CHART: 'share_chart',
+  DOWNLOAD_AS_IMAGE: 'download_as_image',
+};
+
+const VerticalDotsContainer = styled.div`
+  padding: ${({ theme }) => theme.gridUnit / 4}px
+    ${({ theme }) => theme.gridUnit * 1.5}px;
+
+  .dot {
+    display: block;
+  }
+
+  &:hover {
+    cursor: pointer;
+  }
+`;
+
+const RefreshTooltip = styled.div`
+  height: auto;
+  margin: ${({ theme }) => theme.gridUnit}px 0;
+  color: ${({ theme }) => theme.colors.grayscale.base};
+  line-height: ${({ theme }) => theme.typography.sizes.m * 1.5}px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+`;
+
+const SCREENSHOT_NODE_SELECTOR = '.dashboard-component-chart-holder';
+
 const VerticalDotsTrigger = () => (
-  <div className="vertical-dots-container">
+  <VerticalDotsContainer>
     <span className="dot" />
     <span className="dot" />
     <span className="dot" />
-  </div>
+  </VerticalDotsContainer>
 );
 
 class SliceHeaderControls extends React.PureComponent {
   constructor(props) {
     super(props);
-    this.exportCSV = this.exportCSV.bind(this);
-    this.exploreChart = this.exploreChart.bind(this);
     this.toggleControls = this.toggleControls.bind(this);
     this.refreshChart = this.refreshChart.bind(this);
-    this.toggleExpandSlice = this.props.toggleExpandSlice.bind(
-      this,
-      this.props.slice.slice_id,
-    );
-
-    this.handleToggleFullSize = this.handleToggleFullSize.bind(this);
+    this.handleMenuClick = this.handleMenuClick.bind(this);
 
     this.state = {
       showControls: false,
     };
-  }
-
-  exportCSV() {
-    this.props.exportCSV(this.props.slice.slice_id);
-  }
-
-  exploreChart() {
-    this.props.exploreChart(this.props.slice.slice_id);
   }
 
   refreshChart() {
@@ -108,8 +129,41 @@ class SliceHeaderControls extends React.PureComponent {
     }));
   }
 
-  handleToggleFullSize() {
-    this.props.handleToggleFullSize();
+  handleMenuClick({ key, domEvent }) {
+    switch (key) {
+      case MENU_KEYS.FORCE_REFRESH:
+        this.refreshChart();
+        break;
+      case MENU_KEYS.TOGGLE_CHART_DESCRIPTION:
+        this.props.toggleExpandSlice(this.props.slice.slice_id);
+        break;
+      case MENU_KEYS.EXPLORE_CHART:
+        this.props.exploreChart(this.props.slice.slice_id);
+        break;
+      case MENU_KEYS.EXPORT_CSV:
+        this.props.exportCSV(this.props.slice.slice_id);
+        break;
+      case MENU_KEYS.RESIZE_LABEL:
+        this.props.handleToggleFullSize();
+        break;
+      case MENU_KEYS.DOWNLOAD_AS_IMAGE: {
+        // menu closes with a delay, we need to hide it manually,
+        // so that we don't capture it on the screenshot
+        const menu = document.querySelector(
+          '.ant-dropdown:not(.ant-dropdown-hidden)',
+        );
+        menu.style.visibility = 'hidden';
+        downloadAsImage(
+          SCREENSHOT_NODE_SELECTOR,
+          this.props.slice.slice_name,
+        )(domEvent).then(() => {
+          menu.style.visibility = 'visible';
+        });
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   render() {
@@ -119,85 +173,107 @@ class SliceHeaderControls extends React.PureComponent {
       cachedDttm,
       updatedDttm,
       componentId,
+      addSuccessToast,
       addDangerToast,
       isFullSize,
     } = this.props;
-    const cachedWhen = moment.utc(cachedDttm).fromNow();
+    const cachedWhen = cachedDttm.map(itemCachedDttm =>
+      moment.utc(itemCachedDttm).fromNow(),
+    );
     const updatedWhen = updatedDttm ? moment.utc(updatedDttm).fromNow() : '';
-    const refreshTooltip = isCached
-      ? t('Cached %s', cachedWhen)
-      : (updatedWhen && t('Fetched %s', updatedWhen)) || '';
-    const resizeLabel = isFullSize ? t('Minimize') : t('Maximize');
+    const getCachedTitle = itemCached => {
+      if (itemCached) {
+        return t('Cached %s', cachedWhen);
+      }
+      if (updatedWhen) {
+        return t('Fetched %s', updatedWhen);
+      }
+      return '';
+    };
+    const refreshTooltipData = isCached.map(getCachedTitle) || '';
+    // If all queries have same cache time we can unit them to one
+    let refreshTooltip = [...new Set(refreshTooltipData)];
+    refreshTooltip = refreshTooltip.map((item, index) => (
+      <div key={`tooltip-${index}`}>
+        {refreshTooltip.length > 1
+          ? `${t('Query')} ${index + 1}: ${item}`
+          : item}
+      </div>
+    ));
+    const resizeLabel = isFullSize ? t('Minimize chart') : t('Maximize chart');
+    const menu = (
+      <Menu
+        onClick={this.handleMenuClick}
+        selectable={false}
+        data-test={`slice_${slice.slice_id}-menu`}
+      >
+        <Menu.Item
+          key={MENU_KEYS.FORCE_REFRESH}
+          disabled={this.props.chartStatus === 'loading'}
+          style={{ height: 'auto', lineHeight: 'initial' }}
+          data-test="refresh-chart-menu-item"
+        >
+          {t('Force refresh')}
+          <RefreshTooltip data-test="dashboard-slice-refresh-tooltip">
+            {refreshTooltip}
+          </RefreshTooltip>
+        </Menu.Item>
+
+        <Menu.Divider />
+
+        {slice.description && (
+          <Menu.Item key={MENU_KEYS.TOGGLE_CHART_DESCRIPTION}>
+            {t('Toggle chart description')}
+          </Menu.Item>
+        )}
+
+        {this.props.supersetCanExplore && (
+          <Menu.Item key={MENU_KEYS.EXPLORE_CHART}>
+            {t('View chart in Explore')}
+          </Menu.Item>
+        )}
+
+        <ShareMenuItems
+          url={getDashboardUrl(
+            window.location.pathname,
+            getActiveFilters(),
+            componentId,
+          )}
+          copyMenuItemTitle={t('Copy chart URL')}
+          emailMenuItemTitle={t('Share chart by email')}
+          emailSubject={t('Superset chart')}
+          addSuccessToast={addSuccessToast}
+          addDangerToast={addDangerToast}
+        />
+
+        <Menu.Item key={MENU_KEYS.RESIZE_LABEL}>{resizeLabel}</Menu.Item>
+
+        <Menu.Item key={MENU_KEYS.DOWNLOAD_AS_IMAGE}>
+          {t('Download as image')}
+        </Menu.Item>
+
+        {this.props.supersetCanCSV && (
+          <Menu.Item key={MENU_KEYS.EXPORT_CSV}>{t('Export CSV')}</Menu.Item>
+        )}
+      </Menu>
+    );
 
     return (
-      <Dropdown
-        id={`slice_${slice.slice_id}-controls`}
-        pullRight
-        // react-bootstrap handles visibility, but call toggle to force a re-render
-        // and update the fetched/cached timestamps
-        onToggle={this.toggleControls}
+      <NoAnimationDropdown
+        overlay={menu}
+        trigger={['click']}
+        placement="bottomRight"
+        dropdownAlign={{
+          offset: [-40, 4],
+        }}
+        getPopupContainer={triggerNode =>
+          triggerNode.closest(SCREENSHOT_NODE_SELECTOR)
+        }
       >
-        <Dropdown.Toggle className="slice-header-controls-trigger" noCaret>
+        <span id={`slice_${slice.slice_id}-controls`} role="button">
           <VerticalDotsTrigger />
-        </Dropdown.Toggle>
-
-        <Dropdown.Menu>
-          <MenuItem
-            onClick={this.refreshChart}
-            disabled={this.props.chartStatus === 'loading'}
-          >
-            {t('Force refresh')}
-            <div className="refresh-tooltip">{refreshTooltip}</div>
-          </MenuItem>
-
-          <MenuItem divider />
-
-          {slice.description && (
-            <MenuItem onClick={this.toggleExpandSlice}>
-              {t('Toggle chart description')}
-            </MenuItem>
-          )}
-
-          {this.props.sliceCanEdit && (
-            <MenuItem href={slice.edit_url} target="_blank">
-              {t('Edit chart metadata')}
-            </MenuItem>
-          )}
-
-          {this.props.supersetCanCSV && (
-            <MenuItem onClick={this.exportCSV}>{t('Export CSV')}</MenuItem>
-          )}
-
-          {this.props.supersetCanExplore && (
-            <MenuItem onClick={this.exploreChart}>
-              {t('Explore chart')}
-            </MenuItem>
-          )}
-
-          <MenuItem onClick={this.handleToggleFullSize}>{resizeLabel}</MenuItem>
-
-          <URLShortLinkModal
-            url={getDashboardUrl(
-              window.location.pathname,
-              getActiveFilters(),
-              componentId,
-            )}
-            addDangerToast={addDangerToast}
-            isMenuItem
-            title={t('Share chart')}
-            triggerNode={<span>{t('Share chart')}</span>}
-          />
-
-          <MenuItem
-            onClick={downloadAsImage(
-              '.dashboard-component-chart-holder',
-              slice.slice_name,
-            )}
-          >
-            {t('Download as image')}
-          </MenuItem>
-        </Dropdown.Menu>
-      </Dropdown>
+        </span>
+      </NoAnimationDropdown>
     );
   }
 }

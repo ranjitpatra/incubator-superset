@@ -63,7 +63,7 @@ pip install --upgrade setuptools pip
 
 ### Python Virtual Environment
 
-We highly recommend installing Superset insode of a virtual environment. Python 3 ships with
+We highly recommend installing Superset inside of a virtual environment. Python ships with
 `virtualenv` out of the box but you can install it using:
 
 ```
@@ -119,14 +119,4 @@ locally by default at `localhost:8088`) and login using the username and passwor
 
 ### Installing Superset with Helm in Kubernetes
 
-You can install Superset into Kubernetes with [Helm](https://helm.sh/). The chart is located in
-`install/helm`.
-
-To install Superset in Kubernetes, run:
-
-```
-helm upgrade --install superset ./install/helm/superset
-```
-
-Note that the above command will install Superset into `default` namespace of your Kubernetes
-cluster.
+See the dedicated [Kubernetes installation](/docs/installation/running-on-kubernetes) page.

@@ -21,7 +21,7 @@ import configureStore from 'redux-mock-store';
 import { shallow } from 'enzyme';
 import { ColumnOption, MetricOption } from '@superset-ui/chart-controls';
 
-import MetricDefinitionOption from 'src/explore/components/MetricDefinitionOption';
+import MetricDefinitionOption from 'src/explore/components/controls/MetricControl/MetricDefinitionOption';
 import AggregateOption from 'src/explore/components/AggregateOption';
 
 describe('MetricDefinitionOption', () => {
@@ -29,13 +29,13 @@ describe('MetricDefinitionOption', () => {
   const store = mockStore({});
 
   function setup(props) {
-    return shallow(<MetricDefinitionOption {...props} />, {
-      context: { store },
-    }).dive();
+    return shallow(<MetricDefinitionOption store={store} {...props} />).dive();
   }
 
   it('renders a MetricOption given a saved metric', () => {
-    const wrapper = setup({ option: { metric_name: 'a_saved_metric' } });
+    const wrapper = setup({
+      option: { metric_name: 'a_saved_metric', expression: 'COUNT(*)' },
+    });
     expect(wrapper.find(MetricOption)).toExist();
   });
 

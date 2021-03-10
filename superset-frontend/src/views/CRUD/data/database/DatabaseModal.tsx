@@ -17,16 +17,18 @@
  * under the License.
  */
 import React, { FunctionComponent, useState, useEffect } from 'react';
+import { useSelector } from 'react-redux';
 import { styled, t, SupersetClient } from '@superset-ui/core';
-import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
+import InfoTooltip from 'src/common/components/InfoTooltip';
 import { useSingleViewResource } from 'src/views/CRUD/hooks';
 import withToasts from 'src/messageToasts/enhancers/withToasts';
-import getClientErrorObject from 'src/utils/getClientErrorObject';
+import { getClientErrorObject } from 'src/utils/getClientErrorObject';
 import Icon from 'src/components/Icon';
 import Modal from 'src/common/components/Modal';
 import Tabs from 'src/common/components/Tabs';
 import Button from 'src/components/Button';
 import IndeterminateCheckbox from 'src/components/IndeterminateCheckbox';
+import { JsonEditor } from 'src/components/AsyncAceEditor';
 import { DatabaseObject } from './types';
 
 interface DatabaseModalProps {
@@ -38,6 +40,18 @@ interface DatabaseModalProps {
   database?: DatabaseObject | null; // If included, will go into edit mode
 }
 
+// todo: define common type fully in types file
+interface RootState {
+  common: {
+    conf: {
+      SQLALCHEMY_DOCS_URL: string;
+      SQLALCHEMY_DISPLAY_TEXT: string;
+    };
+  };
+  messageToast: Array<Object>;
+}
+
+const DEFAULT_TAB_KEY = '1';
 const StyledIcon = styled(Icon)`
   margin: auto ${({ theme }) => theme.gridUnit * 2}px auto 0;
 `;
@@ -45,11 +59,14 @@ const StyledIcon = styled(Icon)`
 const StyledInputContainer = styled.div`
   margin-bottom: ${({ theme }) => theme.gridUnit * 2}px;
 
-  .label,
+  &.extra-container {
+    padding-top: 8px;
+  }
+
   .helper {
     display: block;
     padding: ${({ theme }) => theme.gridUnit}px 0;
-    color: ${({ theme }) => theme.colors.grayscale.light1};
+    color: ${({ theme }) => theme.colors.grayscale.base};
     font-size: ${({ theme }) => theme.typography.sizes.s - 1}px;
     text-align: left;
 
@@ -70,11 +87,6 @@ const StyledInputContainer = styled.div`
 
     i {
       margin: 0 ${({ theme }) => theme.gridUnit}px;
-    }
-
-    .btn-primary {
-      height: 36px;
-      font-size: ${({ theme }) => theme.typography.sizes.s - 1}px;
     }
   }
 
@@ -113,6 +125,12 @@ const StyledInputContainer = styled.div`
   }
 `;
 
+const StyledJsonEditor = styled(JsonEditor)`
+  flex: 1 1 auto;
+  border: 1px solid ${({ theme }) => theme.colors.grayscale.light2};
+  border-radius: ${({ theme }) => theme.gridUnit}px;
+`;
+
 const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   addDangerToast,
   addSuccessToast,
@@ -124,8 +142,13 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   const [disableSave, setDisableSave] = useState<boolean>(true);
   const [db, setDB] = useState<DatabaseObject | null>(null);
   const [isHidden, setIsHidden] = useState<boolean>(true);
+  const [tabKey, setTabKey] = useState<string>(DEFAULT_TAB_KEY);
+  const conf = useSelector((state: RootState) => state.common.conf);
 
   const isEditMode = database !== null;
+  const defaultExtra =
+    '{\n  "metadata_params": {},\n  "engine_params": {},' +
+    '\n  "metadata_cache_timeout": {},\n  "schemas_allowed_for_csv_upload": [] \n}';
 
   // Database fetch logic
   const {
@@ -167,7 +190,15 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
       .catch(response =>
         getClientErrorObject(response).then(error => {
           addDangerToast(
-            t('ERROR: Connection failed. ') + error?.message || '',
+            error?.message
+              ? `${t('ERROR: ')}${
+                  typeof error.message === 'string'
+                    ? error.message
+                    : Object.entries(error.message as Record<string, string[]>)
+                        .map(([key, value]) => `(${key}) ${value.join(', ')}`)
+                        .join('\n')
+                }`
+              : t('ERROR: Connection failed. '),
           );
         }),
       );
@@ -194,22 +225,24 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
       }
 
       if (db && db.id) {
-        updateResource(db.id, update).then(() => {
-          if (onDatabaseAdd) {
-            onDatabaseAdd();
+        updateResource(db.id, update).then(result => {
+          if (result) {
+            if (onDatabaseAdd) {
+              onDatabaseAdd();
+            }
+            hide();
           }
-
-          hide();
         });
       }
     } else if (db) {
       // Create
-      createResource(db).then(() => {
-        if (onDatabaseAdd) {
-          onDatabaseAdd();
+      createResource(db).then(dbId => {
+        if (dbId) {
+          if (onDatabaseAdd) {
+            onDatabaseAdd();
+          }
+          hide();
         }
-
-        hide();
       });
     }
   };
@@ -244,6 +277,17 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
     setDB(data);
   };
 
+  const onEditorChange = (json: string, name: string) => {
+    const data = {
+      database_name: db ? db.database_name : '',
+      sqlalchemy_uri: db ? db.sqlalchemy_uri : '',
+      ...db,
+    };
+
+    data[name] = json;
+    setDB(data);
+  };
+
   const validate = () => {
     if (
       db &&
@@ -264,12 +308,23 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   ) {
     if (database && database.id !== null && !dbLoading) {
       const id = database.id || 0;
+      setTabKey(DEFAULT_TAB_KEY);
 
-      fetchResource(id).then(() => {
-        setDB(dbFetched);
-      });
+      fetchResource(id)
+        .then(() => {
+          setDB(dbFetched);
+        })
+        .catch(errMsg =>
+          addDangerToast(
+            t(
+              'Sorry there was an error fetching database information: %s',
+              errMsg.message,
+            ),
+          ),
+        );
     }
   } else if (!isEditMode && (!db || db.id || (isHidden && show))) {
+    setTabKey(DEFAULT_TAB_KEY);
     setDB({
       database_name: '',
       sqlalchemy_uri: '',
@@ -286,8 +341,13 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
     setIsHidden(false);
   }
 
+  const tabChange = (key: string) => {
+    setTabKey(key);
+  };
+
   return (
     <Modal
+      name="database"
       className="database-modal"
       disablePrimaryButton={disableSave}
       onHandledPrimaryAction={onSave}
@@ -298,11 +358,15 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
       title={
         <h4>
           <StyledIcon name="database" />
-          {isEditMode ? t('Edit Database') : t('Add Database')}
+          {isEditMode ? t('Edit database') : t('Add database')}
         </h4>
       }
     >
-      <Tabs defaultActiveKey="1">
+      <Tabs
+        defaultActiveKey={DEFAULT_TAB_KEY}
+        activeKey={tabKey}
+        onTabClick={tabChange}
+      >
         <Tabs.TabPane
           tab={
             <span>
@@ -313,8 +377,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
           key="1"
         >
           <StyledInputContainer>
-            <div className="label">
-              {t('Datasource Name')}
+            <div className="control-label">
+              {t('Database name')}
               <span className="required">*</span>
             </div>
             <div className="input-container">
@@ -322,13 +386,13 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                 type="text"
                 name="database_name"
                 value={db ? db.database_name : ''}
-                placeholder={t('Name your datasource')}
+                placeholder={t('Name your dataset')}
                 onChange={onInputChange}
               />
             </div>
           </StyledInputContainer>
           <StyledInputContainer>
-            <div className="label">
+            <div className="control-label">
               {t('SQLAlchemy URI')}
               <span className="required">*</span>
             </div>
@@ -337,21 +401,24 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                 type="text"
                 name="sqlalchemy_uri"
                 value={db ? db.sqlalchemy_uri : ''}
-                placeholder={t('SQLAlchemy URI')}
+                autoComplete="off"
+                placeholder={t(
+                  'dialect+driver://username:password@host:port/database',
+                )}
                 onChange={onInputChange}
               />
               <Button buttonStyle="primary" onClick={testConnection} cta>
-                {t('Test Connection')}
+                {t('Test connection')}
               </Button>
             </div>
             <div className="helper">
               {t('Refer to the ')}
               <a
-                href="https://docs.sqlalchemy.org/en/rel_1_2/core/engines.html#"
+                href={conf?.SQLALCHEMY_DOCS_URL ?? ''}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                {t('SQLAlchemy docs')}
+                {conf?.SQLALCHEMY_DISPLAY_TEXT ?? ''}
               </a>
               {t(' for more information on how to structure your URI.')}
             </div>
@@ -359,13 +426,13 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
         </Tabs.TabPane>
         <Tabs.TabPane tab={<span>{t('Performance')}</span>} key="2">
           <StyledInputContainer>
-            <div className="label">{t('Chart Cache Timeout')}</div>
+            <div className="control-label">{t('Chart cache timeout')}</div>
             <div className="input-container">
               <input
                 type="number"
                 name="cache_timeout"
                 value={db ? db.cache_timeout || '' : ''}
-                placeholder={t('Chart Cache Timeout')}
+                placeholder={t('Chart cache timeout')}
                 onChange={onInputChange}
               />
             </div>
@@ -385,9 +452,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                 checked={db ? !!db.allow_run_async : false}
                 onChange={onInputChange}
               />
-              <div>{t('Asynchronous Query Execution')}</div>
-              <InfoTooltipWithTrigger
-                label="aqe"
+              <div>{t('Asynchronous query execution')}</div>
+              <InfoTooltip
                 tooltip={t(
                   'Operate the database in asynchronous mode, meaning that the queries ' +
                     'are executed on remote workers as opposed to on the web server itself. ' +
@@ -398,7 +464,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
             </div>
           </StyledInputContainer>
         </Tabs.TabPane>
-        <Tabs.TabPane tab={<span>{t('SQL Lab Settings')}</span>} key="3">
+        <Tabs.TabPane tab={<span>{t('SQL Lab settings')}</span>} key="3">
           <StyledInputContainer>
             <StyledInputContainer>
               <div className="input-container">
@@ -409,9 +475,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                   onChange={onInputChange}
                 />
                 <div>{t('Expose in SQL Lab')}</div>
-                <InfoTooltipWithTrigger
-                  label="sql-expose"
-                  tooltip={t('Expose this DB in SQL Lab')}
+                <InfoTooltip
+                  tooltip={t('Allow this database to be queried in SQL Lab')}
                 />
               </div>
             </StyledInputContainer>
@@ -424,9 +489,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                   onChange={onInputChange}
                 />
                 <div>{t('Allow CREATE TABLE AS')}</div>
-                <InfoTooltipWithTrigger
-                  label="allow-cta"
-                  tooltip={t('Allow CREATE TABLE AS option in SQL Lab')}
+                <InfoTooltip
+                  tooltip={t('Allow creation of new tables based on queries')}
                 />
               </div>
             </StyledInputContainer>
@@ -439,9 +503,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                   onChange={onInputChange}
                 />
                 <div>{t('Allow CREATE VIEW AS')}</div>
-                <InfoTooltipWithTrigger
-                  label="allow-cva"
-                  tooltip={t('Allow CREATE VIEW AS option in SQL Lab')}
+                <InfoTooltip
+                  tooltip={t('Allow creation of new views based on queries')}
                 />
               </div>
             </StyledInputContainer>
@@ -454,10 +517,9 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                   onChange={onInputChange}
                 />
                 <div>{t('Allow DML')}</div>
-                <InfoTooltipWithTrigger
-                  label="allow-dml"
+                <InfoTooltip
                   tooltip={t(
-                    'Allow users to run non-SELECT statements (UPDATE, DELETE, CREATE, ...)',
+                    'Allow manipulation of the database using non-SELECT statements such as UPDATE, DELETE, CREATE, etc.',
                   )}
                 />
               </div>
@@ -470,9 +532,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                   checked={db ? !!db.allow_multi_schema_metadata_fetch : false}
                   onChange={onInputChange}
                 />
-                <div>{t('Allow Multi Schema Metadata Fetch')}</div>
-                <InfoTooltipWithTrigger
-                  label="allow-msmf"
+                <div>{t('Allow multi schema metadata fetch')}</div>
+                <InfoTooltip
                   tooltip={t(
                     'Allow SQL Lab to fetch a list of all tables and all views across all database ' +
                       'schemas. For large data warehouse with thousands of tables, this can be ' +
@@ -483,13 +544,13 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
             </StyledInputContainer>
           </StyledInputContainer>
           <StyledInputContainer>
-            <div className="label">{t('CTAS Schema')}</div>
+            <div className="control-label">{t('CTAS schema')}</div>
             <div className="input-container">
               <input
                 type="text"
                 name="force_ctas_schema"
                 value={db ? db.force_ctas_schema || '' : ''}
-                placeholder={t('CTAS Schema')}
+                placeholder={t('CTAS schema')}
                 onChange={onInputChange}
               />
             </div>
@@ -503,13 +564,17 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
         </Tabs.TabPane>
         <Tabs.TabPane tab={<span>{t('Security')}</span>} key="4">
           <StyledInputContainer>
-            <div className="label">{t('Secure Extra')}</div>
+            <div className="control-label">{t('Secure extra')}</div>
             <div className="input-container">
-              <textarea
+              <StyledJsonEditor
                 name="encrypted_extra"
                 value={db ? db.encrypted_extra || '' : ''}
-                placeholder={t('Secure Extra')}
-                onChange={onTextChange}
+                placeholder={t('Secure extra')}
+                onChange={(json: string) =>
+                  onEditorChange(json, 'encrypted_extra')
+                }
+                width="100%"
+                height="160px"
               />
             </div>
             <div className="helper">
@@ -528,12 +593,12 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
             </div>
           </StyledInputContainer>
           <StyledInputContainer>
-            <div className="label">{t('Root Certificate')}</div>
+            <div className="control-label">{t('Root certificate')}</div>
             <div className="input-container">
               <textarea
                 name="server_cert"
                 value={db ? db.server_cert || '' : ''}
-                placeholder={t('Root Certificate')}
+                placeholder={t('Root certificate')}
                 onChange={onTextChange}
               />
             </div>
@@ -555,8 +620,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                 onChange={onInputChange}
               />
               <div>{t('Impersonate Logged In User (Presto & Hive)')}</div>
-              <InfoTooltipWithTrigger
-                label="impersonate"
+              <InfoTooltip
                 tooltip={t(
                   'If Presto, all the queries in SQL Lab are going to be executed as the ' +
                     'currently logged on user who must have permission to run them. If Hive ' +
@@ -575,26 +639,24 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
                 checked={db ? !!db.allow_csv_upload : false}
                 onChange={onInputChange}
               />
-              <div>{t('Allow CSV Upload')}</div>
-              <InfoTooltipWithTrigger
-                label="allow-csv"
+              <div>{t('Allow data upload')}</div>
+              <InfoTooltip
                 tooltip={t(
-                  'If selected, please set the schemas allowed for csv upload in Extra.',
+                  'If selected, please set the schemas allowed for data upload in Extra.',
                 )}
               />
             </div>
           </StyledInputContainer>
-          <StyledInputContainer>
-            <div className="label">{t('Extra')}</div>
+          <StyledInputContainer className="extra-container">
+            <div className="control-label">{t('Extra')}</div>
             <div className="input-container">
-              <textarea
+              <StyledJsonEditor
                 name="extra"
-                value={db ? db.extra || '' : ''}
-                placeholder={
-                  '{\n  "metadata_params": {},\n  "engine_params": {},' +
-                  '\n  "metadata_cache_timeout": {},\n  "schemas_allowed_for_csv_upload": [] \n}'
-                }
-                onChange={onTextChange}
+                value={(db && db.extra) ?? defaultExtra}
+                placeholder={t('Secure extra')}
+                onChange={(json: string) => onEditorChange(json, 'extra')}
+                width="100%"
+                height="160px"
               />
             </div>
             <div className="helper">

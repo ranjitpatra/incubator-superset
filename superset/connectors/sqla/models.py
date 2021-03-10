@@ -17,7 +17,8 @@
 import json
 import logging
 from collections import defaultdict, OrderedDict
-from dataclasses import dataclass, field
+from contextlib import closing
+from dataclasses import dataclass, field  # pylint: disable=wrong-import-order
 from datetime import datetime, timedelta
 from typing import Any, Dict, Hashable, List, NamedTuple, Optional, Tuple, Union
 
@@ -44,18 +45,18 @@ from sqlalchemy import (
     Table,
     Text,
 )
-from sqlalchemy.exc import CompileError, SQLAlchemyError
 from sqlalchemy.orm import backref, Query, relationship, RelationshipProperty, Session
-from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.schema import UniqueConstraint
 from sqlalchemy.sql import column, ColumnElement, literal_column, table, text
-from sqlalchemy.sql.expression import Label, Select, TextAsFrom
+from sqlalchemy.sql.expression import Label, Select, TextAsFrom, TextClause
+from sqlalchemy.types import TypeEngine
 
 from superset import app, db, is_feature_enabled, security_manager
 from superset.connectors.base.models import BaseColumn, BaseDatasource, BaseMetric
-from superset.constants import NULL_STRING
 from superset.db_engine_specs.base import TimestampExpression
-from superset.exceptions import DatabaseNotFound, QueryObjectValidationError
+from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
+from superset.exceptions import QueryObjectValidationError, SupersetSecurityException
+from superset.extensions import event_logger
 from superset.jinja_context import (
     BaseTemplateProcessor,
     ExtraCache,
@@ -64,8 +65,10 @@ from superset.jinja_context import (
 from superset.models.annotations import Annotation
 from superset.models.core import Database
 from superset.models.helpers import AuditMixinNullable, QueryResult
+from superset.result_set import SupersetResultSet
+from superset.sql_parse import ParsedQuery
 from superset.typing import Metric, QueryObjectDict
-from superset.utils import core as utils, import_datasource
+from superset.utils import core as utils
 
 config = app.config
 metadata = Model.metadata  # pylint: disable=no-member
@@ -180,23 +183,37 @@ class TableColumn(Model, BaseColumn):
 
     @property
     def is_numeric(self) -> bool:
+        """
+        Check if the column has a numeric datatype.
+        """
         db_engine_spec = self.table.database.db_engine_spec
         return db_engine_spec.is_db_column_type_match(
-            self.type, utils.DbColumnType.NUMERIC
+            self.type, utils.GenericDataType.NUMERIC
         )
 
     @property
     def is_string(self) -> bool:
+        """
+        Check if the column has a string datatype.
+        """
         db_engine_spec = self.table.database.db_engine_spec
         return db_engine_spec.is_db_column_type_match(
-            self.type, utils.DbColumnType.STRING
+            self.type, utils.GenericDataType.STRING
         )
 
     @property
     def is_temporal(self) -> bool:
+        """
+        Check if the column has a temporal datatype. If column has been set as
+        temporal/non-temporal (`is_dttm` is True or False respectively), return that
+        value. This usually happens during initial metadata fetching or when a column
+        is manually set as temporal (for this `python_date_format` needs to be set).
+        """
+        if self.is_dttm is not None:
+            return self.is_dttm
         db_engine_spec = self.table.database.db_engine_spec
         return db_engine_spec.is_db_column_type_match(
-            self.type, utils.DbColumnType.TEMPORAL
+            self.type, utils.GenericDataType.TEMPORAL
         )
 
     def get_sqla_col(self, label: Optional[str] = None) -> Column:
@@ -266,20 +283,6 @@ class TableColumn(Model, BaseColumn):
             col, pdf, time_grain, self.type
         )
         return self.table.make_sqla_column_compatible(time_expr, label)
-
-    @classmethod
-    def import_obj(cls, i_column: "TableColumn") -> "TableColumn":
-        def lookup_obj(lookup_column: TableColumn) -> TableColumn:
-            return (
-                db.session.query(TableColumn)
-                .filter(
-                    TableColumn.table_id == lookup_column.table_id,
-                    TableColumn.column_name == lookup_column.column_name,
-                )
-                .first()
-            )
-
-        return import_datasource.import_simple_obj(db.session, i_column, lookup_obj)
 
     def dttm_sql_literal(
         self,
@@ -389,20 +392,6 @@ class SqlMetric(Model, BaseMetric):
     def get_perm(self) -> Optional[str]:
         return self.perm
 
-    @classmethod
-    def import_obj(cls, i_metric: "SqlMetric") -> "SqlMetric":
-        def lookup_obj(lookup_metric: SqlMetric) -> SqlMetric:
-            return (
-                db.session.query(SqlMetric)
-                .filter(
-                    SqlMetric.table_id == lookup_metric.table_id,
-                    SqlMetric.metric_name == lookup_metric.metric_name,
-                )
-                .first()
-            )
-
-        return import_datasource.import_simple_obj(db.session, i_metric, lookup_obj)
-
     def get_extra_dict(self) -> Dict[str, Any]:
         try:
             return json.loads(self.extra)
@@ -448,6 +437,8 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
     type = "table"
     query_language = "sql"
     is_rls_supported = True
+    columns: List[TableColumn] = []
+    metrics: List[SqlMetric] = []
     metric_class = SqlMetric
     column_class = TableColumn
     owner_class = security_manager.user_model
@@ -469,6 +460,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
     sql = Column(Text)
     is_sqllab_view = Column(Boolean, default=False)
     template_params = Column(Text)
+    extra = Column(Text)
 
     baselink = "tablemodelview"
 
@@ -486,10 +478,9 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         "template_params",
         "filter_select_enabled",
         "fetch_values_predicate",
+        "extra",
     ]
-    update_from_object_fields = [
-        f for f in export_fields if f not in ("table_name", "database_id")
-    ]
+    update_from_object_fields = [f for f in export_fields if not f == "database_id"]
     export_parent = "database"
     export_children = ["metrics", "columns"]
 
@@ -630,12 +621,54 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         return self.database.sql_url + "?table_name=" + str(self.table_name)
 
     def external_metadata(self) -> List[Dict[str, str]]:
-        cols = self.database.get_columns(self.table_name, schema=self.schema)
-        for col in cols:
-            try:
-                col["type"] = str(col["type"])
-            except CompileError:
-                col["type"] = "UNKNOWN"
+        db_engine_spec = self.database.db_engine_spec
+        if self.sql:
+            engine = self.database.get_sqla_engine(schema=self.schema)
+            sql = self.get_template_processor().process_template(self.sql)
+            parsed_query = ParsedQuery(sql)
+            if not db_engine_spec.is_readonly_query(parsed_query):
+                raise SupersetSecurityException(
+                    SupersetError(
+                        error_type=SupersetErrorType.DATASOURCE_SECURITY_ACCESS_ERROR,
+                        message=_("Only `SELECT` statements are allowed"),
+                        level=ErrorLevel.ERROR,
+                    )
+                )
+            statements = parsed_query.get_statements()
+            if len(statements) > 1:
+                raise SupersetSecurityException(
+                    SupersetError(
+                        error_type=SupersetErrorType.DATASOURCE_SECURITY_ACCESS_ERROR,
+                        message=_("Only single queries supported"),
+                        level=ErrorLevel.ERROR,
+                    )
+                )
+            # TODO(villebro): refactor to use same code that's used by
+            #  sql_lab.py:execute_sql_statements
+            with closing(engine.raw_connection()) as conn:
+                cursor = conn.cursor()
+                query = self.database.apply_limit_to_sql(statements[0])
+                db_engine_spec.execute(cursor, query)
+                result = db_engine_spec.fetch_data(cursor, limit=1)
+                result_set = SupersetResultSet(
+                    result, cursor.description, db_engine_spec
+                )
+                cols = result_set.columns
+        else:
+            db_dialect = self.database.get_dialect()
+            cols = self.database.get_columns(
+                self.table_name, schema=self.schema or None
+            )
+            for col in cols:
+                try:
+                    if isinstance(col["type"], TypeEngine):
+                        col["type"] = db_engine_spec.column_datatype_to_string(
+                            col["type"], db_dialect
+                        )
+                # Broad exception catch, because there are multiple possible exceptions
+                # from different drivers that fall outside CompileError
+                except Exception:  # pylint: disable=broad-except
+                    col["type"] = "UNKNOWN"
         return cols
 
     @property
@@ -654,6 +687,10 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         )
 
     @property
+    def health_check_message(self) -> Optional[str]:
+        return self.extra_dict.get("health_check", {}).get("message")
+
+    @property
     def data(self) -> Dict[str, Any]:
         data_ = super().data
         if self.type == "table":
@@ -666,7 +703,33 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
             data_["fetch_values_predicate"] = self.fetch_values_predicate
             data_["template_params"] = self.template_params
             data_["is_sqllab_view"] = self.is_sqllab_view
+            # Don't return previously populated health check message in case
+            # the health check feature is turned off
+            data_["health_check_message"] = (
+                self.health_check_message
+                if config.get("DATASET_HEALTH_CHECK")
+                else None
+            )
         return data_
+
+    @property
+    def extra_dict(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.extra)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+
+    def get_fetch_values_predicate(self) -> TextClause:
+        tp = self.get_template_processor()
+        try:
+            return text(tp.process_template(self.fetch_values_predicate))
+        except TemplateError as ex:
+            raise QueryObjectValidationError(
+                _(
+                    "Error in jinja expression in fetch values predicate: %(msg)s",
+                    msg=ex.message,
+                )
+            )
 
     def values_for_column(self, column_name: str, limit: int = 10000) -> List[Any]:
         """Runs query against sqla to retrieve some
@@ -685,16 +748,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
             qry = qry.limit(limit)
 
         if self.fetch_values_predicate:
-            tp = self.get_template_processor()
-            try:
-                qry = qry.where(text(tp.process_template(self.fetch_values_predicate)))
-            except TemplateError as ex:
-                raise QueryObjectValidationError(
-                    _(
-                        "Error in jinja expression in fetch values predicate: %(msg)s",
-                        msg=ex.message,
-                    )
-                )
+            qry = qry.where(self.get_fetch_values_predicate())
 
         engine = self.database.get_sqla_engine()
         sql = "{}".format(qry.compile(engine, compile_kwargs={"literal_binds": True}))
@@ -755,6 +809,19 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     )
 
             from_sql = sqlparse.format(from_sql, strip_comments=True)
+            if len(sqlparse.split(from_sql)) > 1:
+                raise QueryObjectValidationError(
+                    _("Virtual dataset query cannot consist of multiple statements")
+                )
+            parsed_query = ParsedQuery(from_sql)
+            db_engine_spec = self.database.db_engine_spec
+            if not (
+                parsed_query.is_unknown()
+                or db_engine_spec.is_readonly_query(parsed_query)
+            ):
+                raise QueryObjectValidationError(
+                    _("Virtual dataset query must be read-only")
+                )
             return TextAsFrom(sa.text(from_sql), []).alias("expr_qry")
         return self.get_sqla_table()
 
@@ -833,19 +900,20 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         orderby: Optional[List[Tuple[ColumnElement, bool]]] = None,
         extras: Optional[Dict[str, Any]] = None,
         order_desc: bool = True,
+        is_rowcount: bool = False,
+        apply_fetch_values_predicate: bool = False,
     ) -> SqlaQuery:
         """Querying any sqla table from this common interface"""
         template_kwargs = {
-            "from_dttm": from_dttm,
+            "from_dttm": from_dttm.isoformat() if from_dttm else None,
             "groupby": groupby,
             "metrics": metrics,
             "row_limit": row_limit,
             "row_offset": row_offset,
-            "to_dttm": to_dttm,
+            "to_dttm": to_dttm.isoformat() if to_dttm else None,
             "filter": filter,
-            "columns": {col.column_name: col for col in self.columns},
+            "columns": [col.column_name for col in self.columns],
         }
-        is_sip_38 = is_feature_enabled("SIP_38_VIZ_REARCHITECTURE")
         template_kwargs.update(self.template_params_dict)
         extra_cache_keys: List[Any] = []
         template_kwargs["extra_cache_keys"] = extra_cache_keys
@@ -874,12 +942,9 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     "and is required by this type of chart"
                 )
             )
-        if (
-            not metrics
-            and not columns
-            and (is_sip_38 or (not is_sip_38 and not groupby))
-        ):
+        if not metrics and not columns and not groupby:
             raise QueryObjectValidationError(_("Empty query?"))
+
         metrics_exprs: List[ColumnElement] = []
         for metric in metrics:
             if utils.is_adhoc_metric(metric):
@@ -891,6 +956,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                 raise QueryObjectValidationError(
                     _("Metric '%(metric)s' does not exist", metric=metric)
                 )
+
         if metrics_exprs:
             main_metric_expr = metrics_exprs[0]
         else:
@@ -901,14 +967,16 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         groupby_exprs_sans_timestamp = OrderedDict()
 
         assert extras is not None
-        if (is_sip_38 and metrics and columns) or (not is_sip_38 and groupby):
-            # dedup columns while preserving order
-            columns_ = columns if is_sip_38 else groupby
-            assert columns_
-            groupby = list(dict.fromkeys(columns_))
 
+        # filter out the pseudo column  __timestamp from columns
+        columns = columns or []
+        columns = [col for col in columns if col != utils.DTTM_ALIAS]
+
+        if metrics or groupby:
+            # dedup columns while preserving order
+            columns = groupby or columns
             select_exprs = []
-            for selected in groupby:
+            for selected in columns:
                 # if groupby field/expr equals granularity field/expr
                 if selected == granularity:
                     time_grain = extras.get("time_grain_sqla")
@@ -920,7 +988,6 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                 else:
                     outer = literal_column(f"({selected})")
                     outer = self.make_sqla_column_compatible(outer, selected)
-
                 groupby_exprs_sans_timestamp[outer.name] = outer
                 select_exprs.append(outer)
         elif columns:
@@ -934,6 +1001,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
 
         time_range_endpoints = extras.get("time_range_endpoints")
         groupby_exprs_with_timestamp = OrderedDict(groupby_exprs_sans_timestamp.items())
+
         if granularity:
             dttm_col = columns_by_name[granularity]
             time_grain = extras.get("time_grain_sqla")
@@ -941,7 +1009,8 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
 
             if is_timeseries:
                 timestamp = dttm_col.get_timestamp_expression(time_grain)
-                select_exprs += [timestamp]
+                # always put timestamp as the first column
+                select_exprs.insert(0, timestamp)
                 groupby_exprs_with_timestamp[timestamp.name] = timestamp
 
             # Use main dttm column to support index with secondary dttm columns.
@@ -973,7 +1042,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
 
         tbl = self.get_from_clause(template_processor)
 
-        if (is_sip_38 and metrics) or (not is_sip_38 and not columns):
+        if groupby_exprs_with_timestamp:
             qry = qry.group_by(*groupby_exprs_with_timestamp.values())
 
         where_clause_and = []
@@ -995,23 +1064,36 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     target_column_is_numeric=col_obj.is_numeric,
                     is_list_target=is_list_target,
                 )
-                if op in (
-                    utils.FilterOperator.IN.value,
-                    utils.FilterOperator.NOT_IN.value,
-                ):
-                    cond = col_obj.get_sqla_col().in_(eq)
-                    if isinstance(eq, str) and NULL_STRING in eq:
-                        cond = or_(
-                            cond,
-                            col_obj.get_sqla_col()  # pylint: disable=singleton-comparison
-                            == None,
+                if is_list_target:
+                    assert isinstance(eq, (tuple, list))
+                    if len(eq) == 0:
+                        raise QueryObjectValidationError(
+                            _("Filter value list cannot be empty")
                         )
+                    if None in eq:
+                        eq = [x for x in eq if x is not None]
+                        is_null_cond = col_obj.get_sqla_col().is_(None)
+                        if eq:
+                            cond = or_(is_null_cond, col_obj.get_sqla_col().in_(eq))
+                        else:
+                            cond = is_null_cond
+                    else:
+                        cond = col_obj.get_sqla_col().in_(eq)
                     if op == utils.FilterOperator.NOT_IN.value:
                         cond = ~cond
                     where_clause_and.append(cond)
+                elif op == utils.FilterOperator.IS_NULL.value:
+                    where_clause_and.append(col_obj.get_sqla_col().is_(None))
+                elif op == utils.FilterOperator.IS_NOT_NULL.value:
+                    where_clause_and.append(col_obj.get_sqla_col().isnot(None))
                 else:
-                    if col_obj.is_numeric:
-                        eq = utils.cast_to_num(flt["val"])
+                    if eq is None:
+                        raise QueryObjectValidationError(
+                            _(
+                                "Must specify a value for filters "
+                                "with comparison operators"
+                            )
+                        )
                     if op == utils.FilterOperator.EQUALS.value:
                         where_clause_and.append(col_obj.get_sqla_col() == eq)
                     elif op == utils.FilterOperator.NOT_EQUALS.value:
@@ -1026,21 +1108,11 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                         where_clause_and.append(col_obj.get_sqla_col() <= eq)
                     elif op == utils.FilterOperator.LIKE.value:
                         where_clause_and.append(col_obj.get_sqla_col().like(eq))
-                    elif op == utils.FilterOperator.IS_NULL.value:
-                        where_clause_and.append(
-                            col_obj.get_sqla_col()  # pylint: disable=singleton-comparison
-                            == None
-                        )
-                    elif op == utils.FilterOperator.IS_NOT_NULL.value:
-                        where_clause_and.append(
-                            col_obj.get_sqla_col()  # pylint: disable=singleton-comparison
-                            != None
-                        )
                     else:
                         raise QueryObjectValidationError(
                             _("Invalid filter operation type: %(op)s", op=op)
                         )
-        if config["ENABLE_ROW_LEVEL_SECURITY"]:
+        if is_feature_enabled("ROW_LEVEL_SECURITY"):
             where_clause_and += self._get_sqla_row_level_filters(template_processor)
         if extras:
             where = extras.get("where")
@@ -1067,14 +1139,13 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                         )
                     )
                 having_clause_and += [sa.text("({})".format(having))]
+        if apply_fetch_values_predicate and self.fetch_values_predicate:
+            qry = qry.where(self.get_fetch_values_predicate())
         if granularity:
             qry = qry.where(and_(*(time_filters + where_clause_and)))
         else:
             qry = qry.where(and_(*where_clause_and))
         qry = qry.having(and_(*having_clause_and))
-
-        if not orderby and ((is_sip_38 and metrics) or (not is_sip_38 and not columns)):
-            orderby = [(main_metric_expr, not order_desc)]
 
         # To ensure correct handling of the ORDER BY labeling we need to reference the
         # metric instance if defined in the SELECT clause.
@@ -1088,6 +1159,8 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                 col = self.adhoc_metric_to_sqla(col, columns_by_name)
             elif col in columns_by_name:
                 col = columns_by_name[col].get_sqla_col()
+            elif col in metrics_by_name:
+                col = metrics_by_name[col].get_sqla_col()
 
             if isinstance(col, Label):
                 label = col._label  # pylint: disable=protected-access
@@ -1105,7 +1178,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
             is_timeseries  # pylint: disable=too-many-boolean-expressions
             and timeseries_limit
             and not time_groupby_inline
-            and ((is_sip_38 and columns) or (not is_sip_38 and groupby))
+            and groupby
         ):
             if self.database.db_engine_spec.allows_joins:
                 # some sql dialects require for order by expressions
@@ -1168,6 +1241,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     "row_limit": timeseries_limit,
                     "metrics": metrics,
                     "granularity": granularity,
+                    "groupby": groupby,
                     "from_dttm": inner_from_dttm or from_dttm,
                     "to_dttm": inner_to_dttm or to_dttm,
                     "filter": filter,
@@ -1176,8 +1250,6 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     "columns": columns,
                     "order_desc": True,
                 }
-                if not is_sip_38:
-                    prequery_obj["groupby"] = groupby
 
                 result = self.query(prequery_obj)
                 prequeries.append(result.query)
@@ -1190,10 +1262,21 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
                     result.df, dimensions, groupby_exprs_sans_timestamp
                 )
                 qry = qry.where(top_groups)
+        if is_rowcount:
+            if not db_engine_spec.allows_subqueries:
+                raise QueryObjectValidationError(
+                    _("Database does not support subqueries")
+                )
+            label = "rowcount"
+            col = self.make_sqla_column_compatible(literal_column("COUNT(*)"), label)
+            qry = select([col]).select_from(qry.select_from(tbl).alias("rowcount_qry"))
+            labels_expected = [label]
+        else:
+            qry = qry.select_from(tbl)
         return SqlaQuery(
             extra_cache_keys=extra_cache_keys,
             labels_expected=labels_expected,
-            sqla_query=qry.select_from(tbl),
+            sqla_query=qry,
             prequeries=prequeries,
         )
 
@@ -1291,61 +1374,48 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         :param commit: should the changes be committed or not.
         :return: Tuple with lists of added, removed and modified column names.
         """
-        try:
-            new_table = self.get_sqla_table_object()
-        except SQLAlchemyError:
-            raise QueryObjectValidationError(
-                _(
-                    "Table %(table)s doesn't seem to exist in the specified database, "
-                    "couldn't fetch column information",
-                    table=self.table_name,
-                )
-            )
-
+        new_columns = self.external_metadata()
         metrics = []
         any_date_col = None
         db_engine_spec = self.database.db_engine_spec
-        db_dialect = self.database.get_dialect()
         old_columns = db.session.query(TableColumn).filter(TableColumn.table == self)
 
-        old_columns_by_name = {col.column_name: col for col in old_columns}
+        old_columns_by_name: Dict[str, TableColumn] = {
+            col.column_name: col for col in old_columns
+        }
         results = MetadataResult(
             removed=[
                 col
                 for col in old_columns_by_name
-                if col not in {col.name for col in new_table.columns}
+                if col not in {col["name"] for col in new_columns}
             ]
         )
 
         # clear old columns before adding modified columns back
         self.columns = []
-        for col in new_table.columns:
-            try:
-                datatype = db_engine_spec.column_datatype_to_string(
-                    col.type, db_dialect
-                )
-            except Exception as ex:  # pylint: disable=broad-except
-                datatype = "UNKNOWN"
-                logger.error("Unrecognized data type in %s.%s", new_table, col.name)
-                logger.exception(ex)
-            old_column = old_columns_by_name.get(col.name, None)
+        for col in new_columns:
+            old_column = old_columns_by_name.pop(col["name"], None)
             if not old_column:
-                results.added.append(col.name)
+                results.added.append(col["name"])
                 new_column = TableColumn(
-                    column_name=col.name, type=datatype, table=self
+                    column_name=col["name"], type=col["type"], table=self
                 )
                 new_column.is_dttm = new_column.is_temporal
                 db_engine_spec.alter_new_orm_column(new_column)
             else:
                 new_column = old_column
-                if new_column.type != datatype:
-                    results.modified.append(col.name)
-                new_column.type = datatype
+                if new_column.type != col["type"]:
+                    results.modified.append(col["name"])
+                new_column.type = col["type"]
+                new_column.expression = ""
             new_column.groupby = True
             new_column.filterable = True
             self.columns.append(new_column)
             if not any_date_col and new_column.is_temporal:
-                any_date_col = col.name
+                any_date_col = col["name"]
+        self.columns.extend(
+            [col for col in old_columns_by_name.values() if col.expression]
+        )
         metrics.append(
             SqlMetric(
                 metric_name="count",
@@ -1365,56 +1435,6 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
         if commit:
             db.session.commit()
         return results
-
-    @classmethod
-    def import_obj(
-        cls,
-        i_datasource: "SqlaTable",
-        database_id: Optional[int] = None,
-        import_time: Optional[int] = None,
-    ) -> int:
-        """Imports the datasource from the object to the database.
-
-        Metrics and columns and datasource will be overrided if exists.
-        This function can be used to import/export dashboards between multiple
-        superset instances. Audit metadata isn't copies over.
-        """
-
-        def lookup_sqlatable(table_: "SqlaTable") -> "SqlaTable":
-            return (
-                db.session.query(SqlaTable)
-                .join(Database)
-                .filter(
-                    SqlaTable.table_name == table_.table_name,
-                    SqlaTable.schema == table_.schema,
-                    Database.id == table_.database_id,
-                )
-                .first()
-            )
-
-        def lookup_database(table_: SqlaTable) -> Database:
-            try:
-                return (
-                    db.session.query(Database)
-                    .filter_by(database_name=table_.params_dict["database_name"])
-                    .one()
-                )
-            except NoResultFound:
-                raise DatabaseNotFound(
-                    _(
-                        "Database '%(name)s' is not found",
-                        name=table_.params_dict["database_name"],
-                    )
-                )
-
-        return import_datasource.import_datasource(
-            db.session,
-            i_datasource,
-            lookup_database,
-            lookup_sqlatable,
-            import_time,
-            database_id,
-        )
 
     @classmethod
     def query_datasources_by_name(
@@ -1458,7 +1478,7 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
             templatable_statements.append(extras["where"])
         if "having" in extras:
             templatable_statements.append(extras["having"])
-        if config["ENABLE_ROW_LEVEL_SECURITY"] and self.is_rls_supported:
+        if is_feature_enabled("ROW_LEVEL_SECURITY") and self.is_rls_supported:
             templatable_statements += [
                 f.clause for f in security_manager.get_rls_filters(self)
             ]
@@ -1480,6 +1500,26 @@ class SqlaTable(  # pylint: disable=too-many-public-methods,too-many-instance-at
             sqla_query = self.get_sqla_query(**query_obj)
             extra_cache_keys += sqla_query.extra_cache_keys
         return extra_cache_keys
+
+    def health_check(self, commit: bool = False, force: bool = False) -> None:
+        check = config.get("DATASET_HEALTH_CHECK")
+        if check is None:
+            return
+
+        extra = self.extra_dict
+        # force re-run health check, or health check is updated
+        if force or extra.get("health_check", {}).get("version") != check.version:
+            with event_logger.log_context(action="dataset_health_check"):
+                message = check(self)
+                extra["health_check"] = {
+                    "version": check.version,
+                    "message": message,
+                }
+                self.extra = json.dumps(extra)
+
+                db.session.merge(self)
+                if commit:
+                    db.session.commit()
 
 
 sa.event.listen(SqlaTable, "after_insert", security_manager.set_perm)

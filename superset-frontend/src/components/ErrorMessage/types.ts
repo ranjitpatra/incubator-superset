@@ -38,10 +38,14 @@ export const ErrorTypeEnum = {
   // Security access errors
   TABLE_SECURITY_ACCESS_ERROR: 'TABLE_SECURITY_ACCESS_ERROR',
   DATASOURCE_SECURITY_ACCESS_ERROR: 'DATASOURCE_SECURITY_ACCESS_ERROR',
+  DATABASE_SECURITY_ACCESS_ERROR: 'DATABASE_SECURITY_ACCESS_ERROR',
   MISSING_OWNERSHIP_ERROR: 'MISSING_OWNERSHIP_ERROR',
 
   // Other errors
   BACKEND_TIMEOUT_ERROR: 'BACKEND_TIMEOUT_ERROR',
+
+  // Sqllab error
+  MISSING_TEMPLATE_PARAMS_ERROR: 'MISSING_TEMPLATE_PARAMS_ERROR',
 } as const;
 
 type ValueOf<T> = T[keyof T];
@@ -67,6 +71,4 @@ export type ErrorMessageComponentProps<
   source?: ErrorSource;
 };
 
-export type ErrorMessageComponent = React.ComponentType<
-  ErrorMessageComponentProps
->;
+export type ErrorMessageComponent = React.ComponentType<ErrorMessageComponentProps>;

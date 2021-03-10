@@ -31,17 +31,19 @@ from sqlalchemy.engine.url import make_url, URL
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import ColumnClause, Select
 
-from superset import app, cache, conf
+from superset import app, conf
 from superset.db_engine_specs.base import BaseEngineSpec
 from superset.db_engine_specs.presto import PrestoEngineSpec
 from superset.exceptions import SupersetException
+from superset.extensions import cache_manager
 from superset.models.sql_lab import Query
-from superset.sql_parse import Table
+from superset.sql_parse import ParsedQuery, Table
 from superset.utils import core as utils
 
 if TYPE_CHECKING:
     # prevent circular imports
     from superset.models.core import Database
+
 
 QueryStatus = utils.QueryStatus
 config = app.config
@@ -485,26 +487,28 @@ class HiveEngineSpec(PrestoEngineSpec):
         # the configuraiton dictionary. See get_configuration_for_impersonation
 
     @classmethod
-    def get_configuration_for_impersonation(
-        cls, uri: str, impersonate_user: bool, username: Optional[str]
-    ) -> Dict[str, str]:
+    def update_impersonation_config(
+        cls, connect_args: Dict[str, Any], uri: str, username: Optional[str],
+    ) -> None:
         """
-        Return a configuration dictionary that can be merged with other configs
+        Update a configuration dictionary
         that can set the correct properties for impersonating users
+        :param connect_args:
         :param uri: URI string
         :param impersonate_user: Flag indicating if impersonation is enabled
         :param username: Effective username
-        :return: Configs required for impersonation
+        :return: None
         """
-        configuration = {}
         url = make_url(uri)
         backend_name = url.get_backend_name()
 
         # Must be Hive connection, enable impersonation, and set optional param
         # auth=LDAP|KERBEROS
-        if backend_name == "hive" and impersonate_user and username is not None:
+        # this will set hive.server2.proxy.user=$effective_username on connect_args['configuration']
+        if backend_name == "hive" and username is not None:
+            configuration = connect_args.get("configuration", {})
             configuration["hive.server2.proxy.user"] = username
-        return configuration
+            connect_args["configuration"] = configuration
 
     @staticmethod
     def execute(  # type: ignore
@@ -514,7 +518,7 @@ class HiveEngineSpec(PrestoEngineSpec):
         cursor.execute(query, **kwargs)
 
     @classmethod
-    @cache.memoize()
+    @cache_manager.cache.memoize()
     def get_function_names(cls, database: "Database") -> List[str]:
         """
         Get a list of function names that are able to be called on the database.
@@ -524,3 +528,12 @@ class HiveEngineSpec(PrestoEngineSpec):
         :return: A list of function names useable in the database
         """
         return database.get_df("SHOW FUNCTIONS")["tab_name"].tolist()
+
+    @classmethod
+    def is_readonly_query(cls, parsed_query: ParsedQuery) -> bool:
+        """Pessimistic readonly, 100% sure statement won't mutate anything"""
+        return (
+            super().is_readonly_query(parsed_query)
+            or parsed_query.is_set()
+            or parsed_query.is_show()
+        )

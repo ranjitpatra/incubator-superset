@@ -33,11 +33,11 @@ from sqlalchemy import Column, literal_column, types
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.engine.result import RowProxy
-from sqlalchemy.engine.url import URL
+from sqlalchemy.engine.url import make_url, URL
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import ColumnClause, Select
 
-from superset import app, cache, is_feature_enabled, security_manager
+from superset import app, cache_manager, is_feature_enabled
 from superset.db_engine_specs.base import BaseEngineSpec
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import SupersetTemplateException
@@ -111,7 +111,7 @@ def get_children(column: Dict[str, str]) -> List[Dict[str, str]]:
     raise Exception(f"Unknown type {type_}!")
 
 
-class PrestoEngineSpec(BaseEngineSpec):
+class PrestoEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-methods
     engine = "presto"
     engine_name = "Presto"
 
@@ -132,8 +132,31 @@ class PrestoEngineSpec(BaseEngineSpec):
     }
 
     @classmethod
-    def get_allow_cost_estimate(cls, version: Optional[str] = None) -> bool:
+    def get_allow_cost_estimate(cls, extra: Dict[str, Any]) -> bool:
+        version = extra.get("version")
         return version is not None and StrictVersion(version) >= StrictVersion("0.319")
+
+    @classmethod
+    def update_impersonation_config(
+        cls, connect_args: Dict[str, Any], uri: str, username: Optional[str],
+    ) -> None:
+        """
+        Update a configuration dictionary
+        that can set the correct properties for impersonating users
+        :param connect_args: config to be updated
+        :param uri: URI string
+        :param impersonate_user: Flag indicating if impersonation is enabled
+        :param username: Effective username
+        :return: None
+        """
+        url = make_url(uri)
+        backend_name = url.get_backend_name()
+
+        # Must be Presto connection, enable impersonation, and set optional param
+        # auth=LDAP|KERBEROS
+        # Set principal_username=$effective_username
+        if backend_name == "presto" and username is not None:
+            connect_args["principal_username"] = username
 
     @classmethod
     def get_table_names(
@@ -172,9 +195,9 @@ class PrestoEngineSpec(BaseEngineSpec):
 
         engine = cls.get_engine(database, schema=schema)
         with closing(engine.raw_connection()) as conn:
-            with closing(conn.cursor()) as cursor:
-                cursor.execute(sql, params)
-                results = cursor.fetchall()
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            results = cursor.fetchall()
 
         return [row[0] for row in results]
 
@@ -352,8 +375,8 @@ class PrestoEngineSpec(BaseEngineSpec):
         (re.compile(r"^varbinary.*", re.IGNORECASE), types.VARBINARY()),
         (re.compile(r"^json.*", re.IGNORECASE), types.JSON()),
         (re.compile(r"^date.*", re.IGNORECASE), types.DATE()),
-        (re.compile(r"^time.*", re.IGNORECASE), types.Time()),
         (re.compile(r"^timestamp.*", re.IGNORECASE), types.TIMESTAMP()),
+        (re.compile(r"^time.*", re.IGNORECASE), types.Time()),
         (re.compile(r"^interval.*", re.IGNORECASE), Interval()),
         (re.compile(r"^array.*", re.IGNORECASE), Array()),
         (re.compile(r"^map.*", re.IGNORECASE), Map()),
@@ -484,7 +507,7 @@ class PrestoEngineSpec(BaseEngineSpec):
 
     @classmethod
     def estimate_statement_cost(  # pylint: disable=too-many-locals
-        cls, statement: str, database: "Database", cursor: Any, user_name: str
+        cls, statement: str, cursor: Any
     ) -> Dict[str, Any]:
         """
         Run a SQL query that estimates the cost of a given statement.
@@ -495,14 +518,7 @@ class PrestoEngineSpec(BaseEngineSpec):
         :param username: Effective username
         :return: JSON response from Presto
         """
-        parsed_query = ParsedQuery(statement)
-        sql = parsed_query.stripped()
-
-        sql_query_mutator = config["SQL_QUERY_MUTATOR"]
-        if sql_query_mutator:
-            sql = sql_query_mutator(sql, user_name, security_manager, database)
-
-        sql = f"EXPLAIN (TYPE IO, FORMAT JSON) {sql}"
+        sql = f"EXPLAIN (TYPE IO, FORMAT JSON) {statement}"
         cursor.execute(sql)
 
         # the output from Presto is a single column and a single row containing
@@ -764,18 +780,18 @@ class PrestoEngineSpec(BaseEngineSpec):
 
         engine = cls.get_engine(database, schema)
         with closing(engine.raw_connection()) as conn:
-            with closing(conn.cursor()) as cursor:
-                sql = f"SHOW CREATE VIEW {schema}.{table}"
-                try:
-                    cls.execute(cursor, sql)
-                    polled = cursor.poll()
+            cursor = conn.cursor()
+            sql = f"SHOW CREATE VIEW {schema}.{table}"
+            try:
+                cls.execute(cursor, sql)
+                polled = cursor.poll()
 
-                    while polled:
-                        time.sleep(0.2)
-                        polled = cursor.poll()
-                except DatabaseError:  # not a VIEW
-                    return None
-                rows = cls.fetch_data(cursor, 1)
+                while polled:
+                    time.sleep(0.2)
+                    polled = cursor.poll()
+            except DatabaseError:  # not a VIEW
+                return None
+            rows = cls.fetch_data(cursor, 1)
         return rows[0][0]
 
     @classmethod
@@ -930,7 +946,7 @@ class PrestoEngineSpec(BaseEngineSpec):
         return None
 
     @classmethod
-    @cache.memoize(timeout=60)
+    @cache_manager.data_cache.memoize(timeout=60)
     def latest_partition(
         cls,
         table_name: str,
@@ -1030,7 +1046,7 @@ class PrestoEngineSpec(BaseEngineSpec):
         return df.to_dict()[field_to_return][0]
 
     @classmethod
-    @cache.memoize()
+    @cache_manager.data_cache.memoize()
     def get_function_names(cls, database: "Database") -> List[str]:
         """
         Get a list of function names that are able to be called on the database.
@@ -1090,3 +1106,8 @@ class PrestoEngineSpec(BaseEngineSpec):
                 )
             )
         ]
+
+    @classmethod
+    def is_readonly_query(cls, parsed_query: ParsedQuery) -> bool:
+        """Pessimistic readonly, 100% sure statement won't mutate anything"""
+        return super().is_readonly_query(parsed_query) or parsed_query.is_show()

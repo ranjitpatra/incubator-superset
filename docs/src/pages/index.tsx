@@ -35,7 +35,6 @@ import GitHubButton from 'react-github-btn';
 
 import { Databases } from '../resources/data';
 import Layout from '../components/layout';
-import Image from '../components/image';
 import DbImage from '../components/DbImage';
 import 'antd/dist/antd.css';
 import SEO from '../components/seo';
@@ -109,10 +108,6 @@ const titleContainer = css`
     ${[mq[0]]} {
       width: 400px;
     }
-  }
-  .incubator {
-    margin-top: 40px;
-    margin-bottom: 30px;
   }
   .alert {
     color: #0c5460;
@@ -190,8 +185,8 @@ const integrationSection = css`
     flex-wrap: wrap;
     justify-content: space-around;
     margin-bottom: 50px;
-    a {
-      margin: 15px;
+    li {
+      padding: 15px;
     }
   }
 `;
@@ -275,6 +270,7 @@ const Feature = ({ icon, title, descr }: featureProps) => (
     </div>
   </li>
 );
+
 const Theme = () => {
   const config = useConfig();
   const slider = useRef(null);
@@ -299,37 +295,34 @@ const Theme = () => {
             <div className="github-section">
               <span className="github-button">
                 <GitHubButton
-                  href="https://github.com/apache/incubator-superset"
+                  href="https://github.com/apache/superset"
                   data-size="large"
                   data-show-count="true"
-                  aria-label="Star apache/incubator-superset on GitHub"
+                  aria-label="Star apache/superset on GitHub"
                 >
                   Star
                 </GitHubButton>
               </span>
               <span className="github-button">
                 <GitHubButton
-                  href="https://github.com/apache/incubator-superset/subscription"
+                  href="https://github.com/apache/superset/subscription"
                   data-size="large"
                   data-show-count="true"
-                  aria-label="Watch apache/incubator-superset on GitHub"
+                  aria-label="Watch apache/superset on GitHub"
                 >
                   Watch
                 </GitHubButton>
               </span>
               <span className="github-button">
                 <GitHubButton
-                  href="https://github.com/apache/incubator-superset/fork"
+                  href="https://github.com/apache/superset/fork"
                   data-size="large"
                   data-show-count="true"
-                  aria-label="Fork apache/incubator-superset on GitHub"
+                  aria-label="Fork apache/superset on GitHub"
                 >
                   Fork
                 </GitHubButton>
               </span>
-            </div>
-            <div className="incubator">
-              <Image imageName="incubatorSm" />
             </div>
             <div>
               <Link to="/docs/intro">
@@ -368,7 +361,7 @@ const Theme = () => {
                     title="Integrates with modern databases"
                     descr={`
                     Superset can connect to any SQL based datasource
-                    through SQL Alchemy, including modern cloud native databases
+                    through SQLAlchemy, including modern cloud native databases
                     and engines at petabyte scale.
                   `}
                   />
@@ -435,54 +428,46 @@ const Theme = () => {
               </div>
               <Carousel ref={slider} effect="scrollx" afterChange={onChange}>
                 <div className="imageContainer">
-                  <img src="/images/explorer.png" alt="" />
+                  <img src="/images/explorer5.jpg" alt="" />
                 </div>
                 <div className="imageContainer">
                   <img src="/images/dashboard3.png" alt="" />
                 </div>
                 <div className="imageContainer">
-                  <img src="/images/sqllab1.png" alt="" />
+                  <img src="/images/sqllab5.jpg" alt="" />
                 </div>
               </Carousel>
             </div>
-          </div>
-          <div css={integrationSection}>
-            <h2 css={secondaryHeading}>Supported Databases</h2>
+            <div css={integrationSection}>
+              <h2 css={secondaryHeading}>Supported Databases</h2>
 
-            <ul className="database-list">
-              {Databases.map(
-                ({
-                  title, href, imgName: imageName, width, height,
-                }) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    key={imageName}
-                    rel="noreferrer"
-                  >
-                    <DbImage
-                      {...{
-                        imageName,
-                        width,
-                        height,
-                        alt: title,
-                      }}
-                    />
-                  </a>
-                ),
-              )}
-            </ul>
-            <span className="databaseSub">
-              {' '}
-              ... and any other SQLAlchemy
-              {' '}
-              <a href="https://superset.incubator.apache.org/installation.html#database-dependencies">
-                {' '}
-                compatible databases
-                {' '}
-              </a>
-              {' '}
-            </span>
+              <ul className="database-list">
+                {Databases.map(
+                  ({
+                    title, imgName: imageName, width, height,
+                  }) => (
+                    <li>
+                      <DbImage
+                        {...{
+                          imageName,
+                          width,
+                          height,
+                          alt: title,
+                        }}
+                      />
+                    </li>
+                  ),
+                )}
+              </ul>
+              <span className="databaseSub">
+                ... and many other
+                <a href="docs/databases/installing-database-drivers">
+                  {' '}
+                  compatible databases
+                  {' '}
+                </a>
+              </span>
+            </div>
           </div>
         </div>
       </Layout>

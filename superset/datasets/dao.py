@@ -143,8 +143,12 @@ class DatasetDAO(BaseDAO):
         return len(dataset_query) == 0
 
     @classmethod
-    def update(
-        cls, model: SqlaTable, properties: Dict[str, Any], commit: bool = True
+    def update(  # pylint: disable=W:279
+        cls,
+        model: SqlaTable,
+        properties: Dict[str, Any],
+        commit: bool = True,
+        override_columns: bool = False,
     ) -> Optional[SqlaTable]:
         """
         Updates a Dataset model on the metadata DB
@@ -175,6 +179,15 @@ class DatasetDAO(BaseDAO):
                 new_metrics.append(metric_obj)
             properties["metrics"] = new_metrics
 
+        if override_columns:
+            # remove columns initially for full refresh
+            original_properties = properties["columns"]
+            properties["columns"] = []
+            super().update(model, properties, commit=commit)
+            properties["columns"] = original_properties
+
+        super().update(model, properties, commit=False)
+        model.health_check(force=True, commit=False)
         return super().update(model, properties, commit=commit)
 
     @classmethod
@@ -206,6 +219,32 @@ class DatasetDAO(BaseDAO):
         Creates a Dataset model on the metadata DB
         """
         return DatasetMetricDAO.create(properties, commit=commit)
+
+    @staticmethod
+    def bulk_delete(models: Optional[List[SqlaTable]], commit: bool = True) -> None:
+        item_ids = [model.id for model in models] if models else []
+        # bulk delete, first delete related data
+        if models:
+            for model in models:
+                model.owners = []
+                db.session.merge(model)
+            db.session.query(SqlMetric).filter(SqlMetric.table_id.in_(item_ids)).delete(
+                synchronize_session="fetch"
+            )
+            db.session.query(TableColumn).filter(
+                TableColumn.table_id.in_(item_ids)
+            ).delete(synchronize_session="fetch")
+        # bulk delete itself
+        try:
+            db.session.query(SqlaTable).filter(SqlaTable.id.in_(item_ids)).delete(
+                synchronize_session="fetch"
+            )
+            if commit:
+                db.session.commit()
+        except SQLAlchemyError as ex:
+            if commit:
+                db.session.rollback()
+            raise ex
 
 
 class DatasetColumnDAO(BaseDAO):

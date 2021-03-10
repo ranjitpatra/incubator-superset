@@ -22,7 +22,7 @@ from flask_appbuilder.api import expose, protect, rison, safe
 from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_babel import ngettext
 
-from superset.constants import RouteMethod
+from superset.constants import MODEL_API_RW_METHOD_PERMISSION_MAP, RouteMethod
 from superset.css_templates.commands.bulk_delete import BulkDeleteCssTemplateCommand
 from superset.css_templates.commands.exceptions import (
     CssTemplateBulkDeleteFailedError,
@@ -33,6 +33,7 @@ from superset.css_templates.schemas import (
     get_delete_ids_schema,
     openapi_spec_methods_override,
 )
+from superset.extensions import event_logger
 from superset.models.core import CssTemplate
 from superset.views.base_api import BaseSupersetModelRestApi, statsd_metrics
 
@@ -43,9 +44,12 @@ class CssTemplateRestApi(BaseSupersetModelRestApi):
     datamodel = SQLAInterface(CssTemplate)
 
     include_route_methods = RouteMethod.REST_MODEL_VIEW_CRUD_SET | {
+        RouteMethod.RELATED,
         "bulk_delete",  # not using RouteMethod since locally defined
     }
-    class_permission_name = "CssTemplateModelView"
+    class_permission_name = "CssTemplate"
+    method_permission_name = MODEL_API_RW_METHOD_PERMISSION_MAP
+
     resource_name = "css_template"
     allow_browser_login = True
 
@@ -59,6 +63,7 @@ class CssTemplateRestApi(BaseSupersetModelRestApi):
     ]
     list_columns = [
         "changed_on_delta_humanized",
+        "changed_by",
         "created_on",
         "created_by.first_name",
         "created_by.id",
@@ -72,6 +77,7 @@ class CssTemplateRestApi(BaseSupersetModelRestApi):
     order_columns = ["template_name"]
 
     search_filters = {"template_name": [CssTemplateAllTextFilter]}
+    allowed_rel_fields = {"created_by"}
 
     apispec_parameter_schemas = {
         "get_delete_ids_schema": get_delete_ids_schema,
@@ -83,6 +89,10 @@ class CssTemplateRestApi(BaseSupersetModelRestApi):
     @protect()
     @safe
     @statsd_metrics
+    @event_logger.log_this_with_context(
+        action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.bulk_delete",
+        log_to_statsd=False,
+    )
     @rison(get_delete_ids_schema)
     def bulk_delete(self, **kwargs: Any) -> Response:
         """Delete bulk CSS Templates

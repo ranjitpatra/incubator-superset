@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass  # pylint: disable=wrong-import-order
 from enum import Enum
 from typing import List, Optional, Set
 from urllib import parse
@@ -58,6 +58,19 @@ def _extract_limit_from_query(statement: TokenList) -> Optional[int]:
     return None
 
 
+def strip_comments_from_sql(statement: str) -> str:
+    """
+    Strips comments from a SQL statement, does a simple test first
+    to avoid always instantiating the expensive ParsedQuery constructor
+
+    This is useful for engines that don't support comments
+
+    :param statement: A string with the SQL statement
+    :return: SQL statement without comments
+    """
+    return ParsedQuery(statement).strip_comments() if "--" in statement else statement
+
+
 @dataclass(eq=True, frozen=True)
 class Table:  # pylint: disable=too-few-public-methods
     """
@@ -81,7 +94,10 @@ class Table:  # pylint: disable=too-few-public-methods
 
 
 class ParsedQuery:
-    def __init__(self, sql_statement: str):
+    def __init__(self, sql_statement: str, strip_comments: bool = False):
+        if strip_comments:
+            sql_statement = sqlparse.format(sql_statement, strip_comments=True)
+
         self.sql: str = sql_statement
         self._tables: Set[Table] = set()
         self._alias_names: Set[str] = set()
@@ -110,15 +126,45 @@ class ParsedQuery:
     def is_select(self) -> bool:
         return self._parsed[0].get_type() == "SELECT"
 
-    def is_explain(self) -> bool:
-        return self.stripped().upper().startswith("EXPLAIN")
+    def is_valid_ctas(self) -> bool:
+        return self._parsed[-1].get_type() == "SELECT"
 
-    def is_readonly(self) -> bool:
-        """Pessimistic readonly, 100% sure statement won't mutate anything"""
-        return self.is_select() or self.is_explain()
+    def is_valid_cvas(self) -> bool:
+        return len(self._parsed) == 1 and self._parsed[0].get_type() == "SELECT"
+
+    def is_explain(self) -> bool:
+        # Remove comments
+        statements_without_comments = sqlparse.format(
+            self.stripped(), strip_comments=True
+        )
+
+        # Explain statements will only be the first statement
+        return statements_without_comments.startswith("EXPLAIN")
+
+    def is_show(self) -> bool:
+        # Remove comments
+        statements_without_comments = sqlparse.format(
+            self.stripped(), strip_comments=True
+        )
+        # Show statements will only be the first statement
+        return statements_without_comments.upper().startswith("SHOW")
+
+    def is_set(self) -> bool:
+        # Remove comments
+        statements_without_comments = sqlparse.format(
+            self.stripped(), strip_comments=True
+        )
+        # Set statements will only be the first statement
+        return statements_without_comments.upper().startswith("SET")
+
+    def is_unknown(self) -> bool:
+        return self._parsed[0].get_type() == "UNKNOWN"
 
     def stripped(self) -> str:
         return self.sql.strip(" \t\n;")
+
+    def strip_comments(self) -> str:
+        return sqlparse.format(self.stripped(), strip_comments=True)
 
     def get_statements(self) -> List[str]:
         """Returns a list of SQL statements as strings, stripped"""

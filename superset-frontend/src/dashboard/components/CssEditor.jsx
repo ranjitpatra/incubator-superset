@@ -81,12 +81,11 @@ class CssEditor extends React.PureComponent {
       <ModalTrigger
         triggerNode={this.props.triggerNode}
         modalTitle={t('CSS')}
-        isMenuItem
         modalBody={
           <div>
             {this.renderTemplateSelector()}
             <div style={{ zIndex: 1 }}>
-              <h5>{t('Live CSS Editor')}</h5>
+              <h5>{t('Live CSS editor')}</h5>
               <div style={{ border: 'solid 1px grey' }}>
                 <AceCssEditor
                   minLines={12}

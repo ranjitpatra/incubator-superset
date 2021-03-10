@@ -17,11 +17,11 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-## Superset users in the wild
+## Superset Users in the Wild
 
 Here's a list of organizations, broken down into broad industry categories, that have taken the time to send a PR to let
 the world know they are using Apache Superset. If you are a user and want to be recognized,
-all you have to do is file a simple PR [like this one](https://github.com/apache/incubator-superset/pull/10122). If you think
+all you have to do is file a simple PR [like this one](https://github.com/apache/superset/pull/10122). If you think
 the categorization is inaccurate, please file a PR with your correction as well.
 Join our growing community!
 
@@ -36,8 +36,10 @@ Join our growing community!
 ### Financial Services
 - [Aktia Bank plc](https://www.aktia.com) [@villebro]
 - [American Express](https://www.americanexpress.com) [@TheLastSultan]
+- [Cape Crypto](https://capecrypto.com)
 - [Capital Service S.A.](http://capitalservice.pl) [@pkonarzewski]
 - [Clark.de](http://clark.de/)
+- [Xendit](http://xendit.co/) [@LieAlbertTriAdrian]
 
 ### Gaming
 - [Digit Game Studios](https://www.digitgaming.com/)
@@ -57,12 +59,15 @@ Join our growing community!
 - [Shopkick](https://www.shopkick.com) [@LAlbertalli]
 - [Tails.com](https://tails.com) [@alanmcruickshank]
 - [THE ICONIC](http://theiconic.com.au/) [@ksaagariconic]
+- [Utair](https://www.utair.ru) [@utair-digital]
 - [Zalando](https://www.zalando.com) [@dmigo]
 - [Zalora](https://www.zalora.com) [@ksaagariconic]
 
 ### Enterprise Technology
+- [A3Data](https://a3data.com.br) [@neylsoncrepalde]
 - [Apollo GraphQL](https://www.apollographql.com/) [@evans]
 - [Astronomer](https://www.astronomer.io) [@ryw]
+- [Avesta Technologies](https://avestatechnologies.com/) [@TheRum]
 - [Cloudsmith](https://cloudsmith.io) [@alancarson]
 - [CnOvit](http://www.cnovit.com/) [@xieshaohu]
 - [Deepomatic](https://deepomatic.com/) [@Zanoellia]
@@ -105,6 +110,7 @@ Join our growing community!
 - [Kuaishou](https://www.kuaishou.com/) [@zhaoyu89730105]
 - [Netflix](https://www.netflix.com/)
 - [TME QQMUSIC/WESING](https://www.tencentmusic.com/)
+- [Xite](https://xite.com/) [@shashankkoppar]
 - [Zaihang](http://www.zaih.com/)
 
 ### Education
@@ -131,4 +137,5 @@ Join our growing community!
  - [komoot](https://www.komoot.com/) [@christophlingg]
  - [Let's Roam](https://www.letsroam.com/)
  - [Twitter](https://twitter.com/)
+ - [VLMedia](https://www.vlmedia.com.tr/) [@ibotheperfect]
  - [Yahoo!](https://yahoo.com/)

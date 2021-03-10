@@ -22,13 +22,13 @@ from superset.commands.exceptions import (
     CommandInvalidError,
     CreateFailedError,
     DeleteFailedError,
+    ImportFailedError,
     UpdateFailedError,
 )
-from superset.security.analytics_db_safety import DBSecurityException
 
 
 class DatabaseInvalidError(CommandInvalidError):
-    message = _("Dashboard parameters are invalid.")
+    message = _("Database parameters are invalid.")
 
 
 class DatabaseExistsValidationError(ValidationError):
@@ -101,7 +101,7 @@ class DatabaseUpdateFailedError(UpdateFailedError):
 class DatabaseConnectionFailedError(  # pylint: disable=too-many-ancestors
     DatabaseCreateFailedError, DatabaseUpdateFailedError,
 ):
-    message = _("Could not connect to database.")
+    message = _("Connection failed, please check your connection settings")
 
 
 class DatabaseDeleteDatasetsExistFailedError(DeleteFailedError):
@@ -112,5 +112,25 @@ class DatabaseDeleteFailedError(DeleteFailedError):
     message = _("Database could not be deleted.")
 
 
-class DatabaseSecurityUnsafeError(DBSecurityException):
+class DatabaseDeleteFailedReportsExistError(DatabaseDeleteFailedError):
+    message = _("There are associated alerts or reports")
+
+
+class DatabaseTestConnectionFailedError(CommandException):
+    message = _("Connection failed, please check your connection settings")
+
+
+class DatabaseSecurityUnsafeError(DatabaseTestConnectionFailedError):
     message = _("Stopped an unsafe database connection")
+
+
+class DatabaseTestConnectionDriverError(DatabaseTestConnectionFailedError):
+    message = _("Could not load database driver")
+
+
+class DatabaseTestConnectionUnexpectedError(DatabaseTestConnectionFailedError):
+    message = _("Unexpected error occurred, please check your logs for details")
+
+
+class DatabaseImportError(ImportFailedError):
+    message = _("Import database failed for an unknown reason")

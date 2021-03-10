@@ -20,14 +20,14 @@ import React, { FunctionComponent, useState } from 'react';
 import { styled, SupersetClient, t } from '@superset-ui/core';
 import { isEmpty, isNil } from 'lodash';
 import Icon from 'src/components/Icon';
-import Modal from 'src/components/Modal';
+import Modal from 'src/common/components/Modal';
 import TableSelector from 'src/components/TableSelector';
 import withToasts from 'src/messageToasts/enhancers/withToasts';
 import { createErrorHandler } from 'src/views/CRUD/utils';
 
 type DatasetAddObject = {
   id: number;
-  databse: number;
+  database: number;
   schema: string;
   table_name: string;
 };
@@ -114,7 +114,7 @@ const DatasetModal: FunctionComponent<DatasetModalProps> = ({
       title={
         <>
           <StyledIcon name="warning-solid" />
-          {t('Add Dataset')}
+          {t('Add dataset')}
         </>
       }
     >

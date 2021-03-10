@@ -18,10 +18,10 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { OverlayTrigger, Popover } from 'react-bootstrap';
 import { t } from '@superset-ui/core';
 import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 
+import Popover from 'src/common/components/Popover';
 import FormRow from '../../../components/FormRow';
 import SelectControl from './SelectControl';
 import CheckboxControl from './CheckboxControl';
@@ -81,7 +81,7 @@ export default class FilterBoxItemControl extends React.Component {
       label,
       defaultValue,
     } = props;
-    const state = {
+    this.state = {
       column,
       metric,
       label,
@@ -91,7 +91,6 @@ export default class FilterBoxItemControl extends React.Component {
       searchAllOptions,
       defaultValue,
     };
-    this.state = state;
     this.onChange = this.onChange.bind(this);
     this.onControlChange = this.onControlChange.bind(this);
   }
@@ -182,7 +181,7 @@ export default class FilterBoxItemControl extends React.Component {
           }
         />
         <FormRow
-          label={t('Sort Metric')}
+          label={t('Sort metric')}
           tooltip={t('Metric to sort the results by')}
           control={
             <SelectControl
@@ -202,7 +201,7 @@ export default class FilterBoxItemControl extends React.Component {
           }
         />
         <FormRow
-          label={t('Sort Ascending')}
+          label={t('Sort ascending')}
           tooltip={t('Check for sorting ascending')}
           isCheckbox
           control={
@@ -213,7 +212,7 @@ export default class FilterBoxItemControl extends React.Component {
           }
         />
         <FormRow
-          label={t('Allow Multiple Selections')}
+          label={t('Allow multiple selections')}
           isCheckbox
           tooltip={t(
             'Multiple selections allowed, otherwise filter ' +
@@ -229,7 +228,7 @@ export default class FilterBoxItemControl extends React.Component {
           }
         />
         <FormRow
-          label={t('Search All Filter Options')}
+          label={t('Search all filter options')}
           tooltip={t(
             'By default, each filter loads at most 1000 choices at the initial page load. ' +
               'Check this box if you have more than 1000 filter values and want to enable dynamically ' +
@@ -265,9 +264,9 @@ export default class FilterBoxItemControl extends React.Component {
 
   renderPopover() {
     return (
-      <Popover id="ts-col-popo" title={t('Filter Configuration')}>
-        <div style={STYLE_WIDTH}>{this.renderForm()}</div>
-      </Popover>
+      <div id="ts-col-popo" style={STYLE_WIDTH}>
+        {this.renderForm()}
+      </div>
     );
   }
 
@@ -275,20 +274,18 @@ export default class FilterBoxItemControl extends React.Component {
     return (
       <span>
         {this.textSummary()}{' '}
-        <OverlayTrigger
-          container={document.body}
+        <Popover
           trigger="click"
-          rootClose
-          ref="trigger"
           placement="right"
-          overlay={this.renderPopover()}
+          content={this.renderPopover()}
+          title={t('Filter configuration')}
         >
           <InfoTooltipWithTrigger
             icon="edit"
             className="text-primary"
             label="edit-ts-column"
           />
-        </OverlayTrigger>
+        </Popover>
       </span>
     );
   }

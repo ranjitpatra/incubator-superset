@@ -19,6 +19,21 @@
 import React, { useEffect } from 'react';
 import { styled, logging } from '@superset-ui/core';
 
+export type BackgroundPosition = 'top' | 'bottom';
+interface ImageContainerProps {
+  src: string;
+  position: BackgroundPosition;
+}
+
+const ImageContainer = styled.div<ImageContainerProps>`
+  background-image: url(${({ src }) => src});
+  background-size: cover;
+  background-position: center ${({ position }) => position};
+  display: inline-block;
+  height: calc(100% - 1px);
+  width: calc(100% - 2px);
+  margin: 1px 1px 0 1px;
+`;
 interface ImageLoaderProps
   extends React.DetailedHTMLProps<
     React.HTMLAttributes<HTMLDivElement>,
@@ -26,24 +41,15 @@ interface ImageLoaderProps
   > {
   fallback: string;
   src: string;
-  isLoading: boolean;
+  isLoading?: boolean;
+  position: BackgroundPosition;
 }
-type ImageContainerProps = {
-  src: string;
-};
-
-const ImageContainer = styled.div`
-  background-image: url(${({ src }: ImageContainerProps) => src});
-  background-size: cover;
-  display: inline-block;
-  height: 100%;
-  width: 100%;
-`;
 
 export default function ImageLoader({
   src,
   fallback,
   isLoading,
+  position,
   ...rest
 }: ImageLoaderProps) {
   const [imgSrc, setImgSrc] = React.useState<string>(fallback);
@@ -58,8 +64,8 @@ export default function ImageLoader({
             setImgSrc(imgURL);
           }
         })
-        .catch(e => {
-          logging.error(e);
+        .catch(errMsg => {
+          logging.error(errMsg);
           setImgSrc(fallback);
         });
     }
@@ -71,5 +77,11 @@ export default function ImageLoader({
     };
   }, [src, fallback]);
 
-  return <ImageContainer src={isLoading ? fallback : imgSrc} {...rest} />;
+  return (
+    <ImageContainer
+      src={isLoading ? fallback : imgSrc}
+      {...rest}
+      position={position}
+    />
+  );
 }

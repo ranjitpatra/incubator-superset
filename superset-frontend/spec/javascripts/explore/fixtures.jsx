@@ -18,7 +18,8 @@
  */
 
 import React from 'react';
-import { ColumnOption, t } from '@superset-ui/core';
+import { t } from '@superset-ui/core';
+import { ColumnOption } from '@superset-ui/chart-controls';
 
 export const controlPanelSectionsChartOptions = [
   {
@@ -82,7 +83,6 @@ export const controlPanelSectionsChartOptionsTable = [
           name: 'all_columns',
           config: {
             type: 'SelectControl',
-            queryField: 'columns',
             multi: true,
             label: t('Columns'),
             default: [],

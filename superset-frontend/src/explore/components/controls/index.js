@@ -36,10 +36,13 @@ import TextControl from './TextControl';
 import TimeSeriesColumnControl from './TimeSeriesColumnControl';
 import ViewportControl from './ViewportControl';
 import VizTypeControl from './VizTypeControl';
-import MetricsControl from './MetricsControl';
-import AdhocFilterControl from './AdhocFilterControl';
+import MetricsControl from './MetricControl/MetricsControl';
+import AdhocFilterControl from './FilterControl/AdhocFilterControl';
 import FilterBoxItemControl from './FilterBoxItemControl';
-import withVerification from './withVerification';
+import DndColumnSelectControl, {
+  DndColumnSelect,
+  DndFilterSelect,
+} from './DndColumnSelectControl';
 
 const controlMap = {
   AnnotationLayerControl,
@@ -51,6 +54,9 @@ const controlMap = {
   ColorSchemeControl,
   DatasourceControl,
   DateFilterControl,
+  DndColumnSelectControl,
+  DndColumnSelect,
+  DndFilterSelect,
   FixedOrMetricControl,
   HiddenControl,
   SelectAsyncControl,
@@ -65,20 +71,5 @@ const controlMap = {
   MetricsControl,
   AdhocFilterControl,
   FilterBoxItemControl,
-  MetricsControlVerifiedOptions: withVerification(
-    MetricsControl,
-    'metric_name',
-    'savedMetrics',
-  ),
-  SelectControlVerifiedOptions: withVerification(
-    SelectControl,
-    'column_name',
-    'options',
-  ),
-  AdhocFilterControlVerifiedOptions: withVerification(
-    AdhocFilterControl,
-    'column_name',
-    'columns',
-  ),
 };
 export default controlMap;

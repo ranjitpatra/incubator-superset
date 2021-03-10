@@ -33,8 +33,6 @@ const CardContainer = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(459px, 1fr));
   grid-gap: ${({ theme }) => theme.gridUnit * 8}px;
-  padding: ${({ theme }) => theme.gridUnit * 2}px
-    ${({ theme }) => theme.gridUnit * 4}px;
 `;
 
 const CardWrapper = styled.div`
@@ -70,9 +68,9 @@ export default function CardCollection({
     <CardContainer>
       {loading &&
         rows.length === 0 &&
-        [...new Array(25)].map((e, i) => {
-          return <div key={i}>{renderCard({ loading })}</div>;
-        })}
+        [...new Array(25)].map((e, i) => (
+          <div key={i}>{renderCard({ loading })}</div>
+        ))}
       {rows.length > 0 &&
         rows.map(row => {
           if (!renderCard) return null;

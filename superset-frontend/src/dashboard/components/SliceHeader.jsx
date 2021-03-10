@@ -20,16 +20,17 @@ import React from 'react';
 import PropTypes from 'prop-types';
 
 import { t } from '@superset-ui/core';
+import { Tooltip } from 'src/common/components/Tooltip';
 import EditableTitle from '../../components/EditableTitle';
-import TooltipWrapper from '../../components/TooltipWrapper';
 import SliceHeaderControls from './SliceHeaderControls';
+import FiltersBadge from '../containers/FiltersBadge';
 
 const propTypes = {
   innerRef: PropTypes.func,
   slice: PropTypes.object.isRequired,
   isExpanded: PropTypes.bool,
-  isCached: PropTypes.bool,
-  cachedDttm: PropTypes.string,
+  isCached: PropTypes.arrayOf(PropTypes.bool),
+  cachedDttm: PropTypes.arrayOf(PropTypes.string),
   updatedDttm: PropTypes.number,
   updateSliceName: PropTypes.func,
   toggleExpandSlice: PropTypes.func,
@@ -46,8 +47,10 @@ const propTypes = {
   componentId: PropTypes.string.isRequired,
   dashboardId: PropTypes.number.isRequired,
   filters: PropTypes.object.isRequired,
+  addSuccessToast: PropTypes.func.isRequired,
   addDangerToast: PropTypes.func.isRequired,
   handleToggleFullSize: PropTypes.func.isRequired,
+  chartStatus: PropTypes.string.isRequired,
 };
 
 const defaultProps = {
@@ -62,8 +65,8 @@ const defaultProps = {
   annotationError: {},
   cachedDttm: null,
   updatedDttm: null,
-  isCached: false,
-  isExpanded: false,
+  isCached: [],
+  isExpanded: [],
   sliceName: '',
   supersetCanExplore: false,
   supersetCanCSV: false,
@@ -96,14 +99,16 @@ class SliceHeader extends React.PureComponent {
       annotationError,
       componentId,
       dashboardId,
+      addSuccessToast,
       addDangerToast,
       handleToggleFullSize,
       isFullSize,
+      chartStatus,
     } = this.props;
 
     return (
       <div className="chart-header" ref={innerRef}>
-        <div className="header">
+        <div className="header-title">
           <EditableTitle
             title={
               sliceName ||
@@ -117,43 +122,50 @@ class SliceHeader extends React.PureComponent {
             showTooltip={false}
           />
           {!!Object.values(annotationQuery).length && (
-            <TooltipWrapper
-              label="annotations-loading"
+            <Tooltip
+              id="annotations-loading-tooltip"
               placement="top"
-              tooltip={annoationsLoading}
+              title={annoationsLoading}
             >
               <i className="fa fa-refresh warning" />
-            </TooltipWrapper>
+            </Tooltip>
           )}
           {!!Object.values(annotationError).length && (
-            <TooltipWrapper
-              label="annoation-errors"
+            <Tooltip
+              id="annoation-errors-tooltip"
               placement="top"
-              tooltip={annoationsError}
+              title={annoationsError}
             >
               <i className="fa fa-exclamation-circle danger" />
-            </TooltipWrapper>
+            </Tooltip>
           )}
+        </div>
+        <div className="header-controls">
           {!editMode && (
-            <SliceHeaderControls
-              slice={slice}
-              isCached={isCached}
-              isExpanded={isExpanded}
-              cachedDttm={cachedDttm}
-              updatedDttm={updatedDttm}
-              toggleExpandSlice={toggleExpandSlice}
-              forceRefresh={forceRefresh}
-              exploreChart={exploreChart}
-              exportCSV={exportCSV}
-              supersetCanExplore={supersetCanExplore}
-              supersetCanCSV={supersetCanCSV}
-              sliceCanEdit={sliceCanEdit}
-              componentId={componentId}
-              dashboardId={dashboardId}
-              addDangerToast={addDangerToast}
-              handleToggleFullSize={handleToggleFullSize}
-              isFullSize={isFullSize}
-            />
+            <>
+              <FiltersBadge chartId={slice.slice_id} />
+              <SliceHeaderControls
+                slice={slice}
+                isCached={isCached}
+                isExpanded={isExpanded}
+                cachedDttm={cachedDttm}
+                updatedDttm={updatedDttm}
+                toggleExpandSlice={toggleExpandSlice}
+                forceRefresh={forceRefresh}
+                exploreChart={exploreChart}
+                exportCSV={exportCSV}
+                supersetCanExplore={supersetCanExplore}
+                supersetCanCSV={supersetCanCSV}
+                sliceCanEdit={sliceCanEdit}
+                componentId={componentId}
+                dashboardId={dashboardId}
+                addSuccessToast={addSuccessToast}
+                addDangerToast={addDangerToast}
+                handleToggleFullSize={handleToggleFullSize}
+                isFullSize={isFullSize}
+                chartStatus={chartStatus}
+              />
+            </>
           )}
         </div>
       </div>

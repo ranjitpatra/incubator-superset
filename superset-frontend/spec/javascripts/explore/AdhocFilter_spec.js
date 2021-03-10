@@ -19,7 +19,7 @@
 import AdhocFilter, {
   EXPRESSION_TYPES,
   CLAUSES,
-} from 'src/explore/AdhocFilter';
+} from 'src/explore/components/controls/FilterControl/AdhocFilter';
 
 describe('AdhocFilter', () => {
   it('sets filterOptionName in constructor', () => {
@@ -142,7 +142,7 @@ describe('AdhocFilter', () => {
     const adhocFilter4 = new AdhocFilter({
       expressionType: EXPRESSION_TYPES.SIMPLE,
       subject: 'value',
-      operator: 'in',
+      operator: 'IN',
       comparator: [],
       clause: CLAUSES.WHERE,
     });
@@ -152,7 +152,7 @@ describe('AdhocFilter', () => {
     const adhocFilter5 = new AdhocFilter({
       expressionType: EXPRESSION_TYPES.SIMPLE,
       subject: 'value',
-      operator: 'in',
+      operator: 'IN',
       comparator: ['val1'],
       clause: CLAUSES.WHERE,
     });

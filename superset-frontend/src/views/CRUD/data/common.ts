@@ -17,17 +17,10 @@
  * under the License.
  */
 import { t } from '@superset-ui/core';
-import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
 
 export const commonMenuData = {
   name: t('Data'),
-  children: [
-    {
-      name: 'Datasets',
-      label: t('Datasets'),
-      url: '/tablemodelview/list/',
-      usesRouter: true,
-    },
+  tabs: [
     {
       name: 'Databases',
       label: t('Databases'),
@@ -35,10 +28,22 @@ export const commonMenuData = {
       usesRouter: true,
     },
     {
-      name: 'Saved Queries',
-      label: t('Saved Queries'),
+      name: 'Datasets',
+      label: t('Datasets'),
+      url: '/tablemodelview/list/',
+      usesRouter: true,
+    },
+    {
+      name: 'Saved queries',
+      label: t('Saved queries'),
       url: '/savedqueryview/list/',
-      usesRouter: isFeatureEnabled(FeatureFlag.SIP_34_SAVED_QUERIES_UI),
+      usesRouter: true,
+    },
+    {
+      name: 'Query history',
+      label: t('Query history'),
+      url: '/superset/sqllab/history/',
+      usesRouter: true,
     },
   ],
 };

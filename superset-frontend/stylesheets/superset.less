@@ -22,6 +22,14 @@
 
 @datasource-sql-expression-width: 315px;
 
+span,
+div,
+i {
+  &:focus {
+    outline: none;
+  }
+}
+
 .alert.alert-danger > .debugger {
   color: @danger;
 }
@@ -76,6 +84,8 @@ input.form-control {
 
 .container-fluid {
   text-align: left;
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
 input[type='checkbox'] {
@@ -191,10 +201,6 @@ table.table-no-hover tr:hover {
   background-color: initial;
 }
 
-.editable-title {
-  margin-right: 8px;
-}
-
 .editable-title input {
   outline: none;
   background: transparent;
@@ -277,18 +283,12 @@ table.table-no-hover tr:hover {
   }
 }
 
-.nav.nav-tabs li .anchor-link-container {
-  top: 0;
-  right: -32px;
-}
-
 .dashboard-component.dashboard-component-header .anchor-link-container {
   .fa.fa-link {
     font-size: @font-size-l;
   }
 }
 
-.nav.nav-tabs li:hover,
 .dashboard-component.dashboard-component-header:hover {
   .anchor-link-container {
     cursor: pointer;
@@ -460,16 +460,8 @@ iframe {
   color: transparent;
 }
 
-.dimmed {
-  opacity: 0.5;
-}
-
 .pointer {
   cursor: pointer;
-}
-
-.PopoverSection {
-  padding-bottom: 10px;
 }
 
 .popover {

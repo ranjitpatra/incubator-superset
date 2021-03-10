@@ -21,9 +21,8 @@ import { styled, SupersetClient, t } from '@superset-ui/core';
 import rison from 'rison';
 import { Select } from 'src/components/Select';
 import Label from 'src/components/Label';
-
+import RefreshLabel from 'src/components/RefreshLabel';
 import SupersetAsyncSelect from './AsyncSelect';
-import RefreshLabel from './RefreshLabel';
 
 const FieldTitle = styled.p`
   color: ${({ theme }) => theme.colors.secondary.light2};
@@ -41,6 +40,7 @@ const DatabaseSelectorWrapper = styled.div`
     display: flex;
     align-items: center;
     width: 30px;
+    margin-left: ${({ theme }) => theme.gridUnit}px;
   }
 
   .section {
@@ -54,6 +54,11 @@ const DatabaseSelectorWrapper = styled.div`
   }
 `;
 
+const DatabaseOption = styled.span`
+  display: inline-flex;
+  align-items: center;
+`;
+
 interface DatabaseSelectorProps {
   dbId: number;
   formMode?: boolean;
@@ -64,6 +69,7 @@ interface DatabaseSelectorProps {
   onDbChange?: (db: any) => void;
   onSchemaChange?: (arg0?: any) => {};
   onSchemasLoad?: (schemas: Array<object>) => void;
+  readOnly?: boolean;
   schema?: string;
   sqlLabMode?: boolean;
   onChange?: ({
@@ -87,6 +93,7 @@ export default function DatabaseSelector({
   onDbChange,
   onSchemaChange,
   onSchemasLoad,
+  readOnly = false,
   schema,
   sqlLabMode = false,
 }: DatabaseSelectorProps) {
@@ -182,10 +189,9 @@ export default function DatabaseSelector({
 
   function renderDatabaseOption(db: any) {
     return (
-      <span title={db.database_name}>
-        <Label bsStyle="default">{db.backend}</Label>
-        {db.database_name}
-      </span>
+      <DatabaseOption title={db.database_name}>
+        <Label type="default">{db.backend}</Label> {db.database_name}
+      </DatabaseOption>
     );
   }
 
@@ -238,7 +244,7 @@ export default function DatabaseSelector({
         mutator={dbMutator}
         placeholder={t('Select a database')}
         autoSelect
-        isDisabled={!isDatabaseSelectEnabled}
+        isDisabled={!isDatabaseSelectEnabled || readOnly}
       />,
       null,
     );
@@ -246,7 +252,7 @@ export default function DatabaseSelector({
 
   function renderSchemaSelect() {
     const value = schemaOptions.filter(({ value }) => currentSchema === value);
-    const refresh = !formMode && (
+    const refresh = !formMode && !readOnly && (
       <RefreshLabel
         onClick={() => changeDataBase({ id: dbId }, true)}
         tooltipContent={t('Force refresh schema list')}
@@ -267,6 +273,7 @@ export default function DatabaseSelector({
         isLoading={schemaLoading}
         autosize={false}
         onChange={item => changeSchema(item)}
+        isDisabled={readOnly}
       />,
       refresh,
     );

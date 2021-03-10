@@ -25,26 +25,33 @@ import PropTypes from 'prop-types';
 import React from 'react';
 import { Sticky, StickyContainer } from 'react-sticky';
 import { TabContainer, TabContent, TabPane } from 'react-bootstrap';
+import { styled } from '@superset-ui/core';
 
-import BuilderComponentPane from './BuilderComponentPane';
-import DashboardHeader from '../containers/DashboardHeader';
-import DashboardGrid from '../containers/DashboardGrid';
-import IconButton from './IconButton';
-import DragDroppable from './dnd/DragDroppable';
-import DashboardComponent from '../containers/DashboardComponent';
-import ToastPresenter from '../../messageToasts/containers/ToastPresenter';
-import WithPopoverMenu from './menu/WithPopoverMenu';
+import ErrorBoundary from 'src/components/ErrorBoundary';
+import BuilderComponentPane from 'src/dashboard/components/BuilderComponentPane';
+import DashboardHeader from 'src/dashboard/containers/DashboardHeader';
+import DashboardGrid from 'src/dashboard/containers/DashboardGrid';
+import IconButton from 'src/dashboard/components/IconButton';
+import DragDroppable from 'src/dashboard/components/dnd/DragDroppable';
+import DashboardComponent from 'src/dashboard/containers/DashboardComponent';
+import ToastPresenter from 'src/messageToasts/containers/ToastPresenter';
+import WithPopoverMenu from 'src/dashboard/components/menu/WithPopoverMenu';
 
-import getDragDropManager from '../util/getDragDropManager';
-import findTabIndexByComponentId from '../util/findTabIndexByComponentId';
+import findTabIndexByComponentId from 'src/dashboard/util/findTabIndexByComponentId';
 
+import getDirectPathToTabIndex from 'src/dashboard/util/getDirectPathToTabIndex';
+import getLeafComponentIdFromPath from 'src/dashboard/util/getLeafComponentIdFromPath';
+import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
+import { URL_PARAMS } from 'src/constants';
 import {
   DASHBOARD_GRID_ID,
   DASHBOARD_ROOT_ID,
   DASHBOARD_ROOT_DEPTH,
+  DashboardStandaloneMode,
 } from '../util/constants';
-import getDirectPathToTabIndex from '../util/getDirectPathToTabIndex';
-import getLeafComponentIdFromPath from '../util/getLeafComponentIdFromPath';
+import FilterBar from './nativeFilters/FilterBar/FilterBar';
+import { StickyVerticalBar } from './StickyVerticalBar';
+import { getUrlParam } from '../../utils/urlUtils';
 
 const TABS_HEIGHT = 47;
 const HEADER_HEIGHT = 67;
@@ -59,6 +66,7 @@ const propTypes = {
   setColorSchemeAndUnsavedChanges: PropTypes.func.isRequired,
   handleComponentDrop: PropTypes.func.isRequired,
   directPathToChild: PropTypes.arrayOf(PropTypes.string),
+  focusedFilterField: PropTypes.object,
   setDirectPathToChild: PropTypes.func.isRequired,
   setMountedTab: PropTypes.func.isRequired,
 };
@@ -69,11 +77,47 @@ const defaultProps = {
   colorScheme: undefined,
 };
 
+const StyledDashboardContent = styled.div`
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  height: auto;
+  flex-grow: 1;
+
+  .grid-container .dashboard-component-tabs {
+    box-shadow: none;
+    padding-left: 0;
+  }
+
+  .grid-container {
+    /* without this, the grid will not get smaller upon toggling the builder panel on */
+    min-width: 0;
+    width: 100%;
+    flex-grow: 1;
+    position: relative;
+    margin: ${({ theme }) => theme.gridUnit * 6}px
+      ${({ theme }) => theme.gridUnit * 8}px
+      ${({ theme }) => theme.gridUnit * 6}px
+      ${({ theme, dashboardFiltersOpen }) => {
+        if (dashboardFiltersOpen) return theme.gridUnit * 8;
+        return 0;
+      }}px;
+  }
+
+  .dashboard-component-chart-holder {
+    // transitionable traits to show filter relevance
+    transition: opacity ${({ theme }) => theme.transitionTiming}s,
+      border-color ${({ theme }) => theme.transitionTiming}s,
+      box-shadow ${({ theme }) => theme.transitionTiming}s;
+    border: 0px solid transparent;
+  }
+`;
+
 class DashboardBuilder extends React.Component {
   static shouldFocusTabs(event, container) {
     // don't focus the tabs when we click on a tab
     return (
-      event.target.tagName === 'UL' ||
+      event.target.className === 'ant-tabs-nav-wrap' ||
       (/icon-button/.test(event.target.className) &&
         container.contains(event.target))
     );
@@ -109,16 +153,14 @@ class DashboardBuilder extends React.Component {
     );
     this.state = {
       tabIndex,
+      dashboardFiltersOpen: true,
     };
 
     this.handleChangeTab = this.handleChangeTab.bind(this);
     this.handleDeleteTopLevelTabs = this.handleDeleteTopLevelTabs.bind(this);
-  }
-
-  getChildContext() {
-    return {
-      dragDropManager: this.context.dragDropManager || getDragDropManager(),
-    };
+    this.toggleDashboardFiltersOpen = this.toggleDashboardFiltersOpen.bind(
+      this,
+    );
   }
 
   UNSAFE_componentWillReceiveProps(nextProps) {
@@ -139,6 +181,24 @@ class DashboardBuilder extends React.Component {
     }
   }
 
+  toggleDashboardFiltersOpen(visible) {
+    if (visible === undefined) {
+      this.setState(state => ({
+        ...state,
+        dashboardFiltersOpen: !state.dashboardFiltersOpen,
+      }));
+    } else {
+      this.setState(state => ({
+        ...state,
+        dashboardFiltersOpen: visible,
+      }));
+    }
+  }
+
+  handleChangeTab({ pathToTabIndex }) {
+    this.props.setDirectPathToChild(pathToTabIndex);
+  }
+
   handleDeleteTopLevelTabs() {
     this.props.deleteTopLevelTabs();
 
@@ -150,10 +210,6 @@ class DashboardBuilder extends React.Component {
     this.props.setDirectPathToChild(firstTab);
   }
 
-  handleChangeTab({ pathToTabIndex }) {
-    this.props.setDirectPathToChild(pathToTabIndex);
-  }
-
   render() {
     const {
       handleComponentDrop,
@@ -162,6 +218,7 @@ class DashboardBuilder extends React.Component {
       showBuilderPane,
       setColorSchemeAndUnsavedChanges,
       colorScheme,
+      directPathToChild,
     } = this.props;
     const { tabIndex } = this.state;
     const dashboardRoot = dashboardLayout[DASHBOARD_ROOT_ID];
@@ -170,6 +227,14 @@ class DashboardBuilder extends React.Component {
       rootChildId !== DASHBOARD_GRID_ID && dashboardLayout[rootChildId];
 
     const childIds = topLevelTabs ? topLevelTabs.children : [DASHBOARD_GRID_ID];
+
+    const hideDashboardHeader =
+      getUrlParam(URL_PARAMS.standalone, 'number') ===
+      DashboardStandaloneMode.HIDE_NAV_AND_TITLE;
+
+    const barTopOffset =
+      (hideDashboardHeader ? 0 : HEADER_HEIGHT) +
+      (topLevelTabs ? TABS_HEIGHT : 0);
 
     return (
       <StickyContainer
@@ -187,11 +252,14 @@ class DashboardBuilder extends React.Component {
               editMode={editMode}
               // you cannot drop on/displace tabs if they already exist
               disableDragdrop={!!topLevelTabs}
-              style={{ zIndex: 100, ...style }}
+              style={{
+                zIndex: 100,
+                ...style,
+              }}
             >
               {({ dropIndicatorProps }) => (
                 <div>
-                  <DashboardHeader />
+                  {!hideDashboardHeader && <DashboardHeader />}
                   {dropIndicatorProps && <div {...dropIndicatorProps} />}
                   {topLevelTabs && (
                     <WithPopoverMenu
@@ -221,9 +289,25 @@ class DashboardBuilder extends React.Component {
             </DragDroppable>
           )}
         </Sticky>
-
-        <div className="dashboard-content">
-          <div className="grid-container">
+        <StyledDashboardContent
+          className="dashboard-content"
+          dashboardFiltersOpen={this.state.dashboardFiltersOpen}
+        >
+          {isFeatureEnabled(FeatureFlag.DASHBOARD_NATIVE_FILTERS) && !editMode && (
+            <StickyVerticalBar
+              filtersOpen={this.state.dashboardFiltersOpen}
+              topOffset={barTopOffset}
+            >
+              <ErrorBoundary>
+                <FilterBar
+                  filtersOpen={this.state.dashboardFiltersOpen}
+                  toggleFiltersBar={this.toggleDashboardFiltersOpen}
+                  directPathToChild={directPathToChild}
+                />
+              </ErrorBoundary>
+            </StickyVerticalBar>
+          )}
+          <div className="grid-container" data-test="grid-container">
             <ParentSize>
               {({ width }) => (
                 /*
@@ -248,12 +332,6 @@ class DashboardBuilder extends React.Component {
                       <TabPane
                         key={index === 0 ? DASHBOARD_GRID_ID : id}
                         eventKey={index}
-                        mountOnEnter
-                        unmountOnExit={false}
-                        onEntering={() => {
-                          // Entering current tab, DOM is visible and has dimension
-                          this.props.setMountedTab(id);
-                        }}
                       >
                         <DashboardGrid
                           gridComponent={dashboardLayout[id]}
@@ -271,13 +349,13 @@ class DashboardBuilder extends React.Component {
           </div>
           {editMode && (
             <BuilderComponentPane
-              topOffset={HEADER_HEIGHT + (topLevelTabs ? TABS_HEIGHT : 0)}
+              topOffset={barTopOffset}
               showBuilderPane={showBuilderPane}
               setColorSchemeAndUnsavedChanges={setColorSchemeAndUnsavedChanges}
               colorScheme={colorScheme}
             />
           )}
-        </div>
+        </StyledDashboardContent>
         <ToastPresenter />
       </StickyContainer>
     );

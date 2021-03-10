@@ -18,12 +18,15 @@
  */
 import React from 'react';
 import { shallow } from 'enzyme';
-import { DropdownButton, MenuItem } from 'react-bootstrap';
+import { Menu, NoAnimationDropdown } from 'src/common/components';
 import RefreshIntervalModal from 'src/dashboard/components/RefreshIntervalModal';
-import URLShortLinkModal from 'src/components/URLShortLinkModal';
 import HeaderActionsDropdown from 'src/dashboard/components/HeaderActionsDropdown';
 import SaveModal from 'src/dashboard/components/SaveModal';
 import CssEditor from 'src/dashboard/components/CssEditor';
+import fetchMock from 'fetch-mock';
+import ShareMenuItems from 'src/dashboard/components/menu/ShareMenuItems';
+
+fetchMock.get('glob:*/csstemplateasyncmodelview/api/read', {});
 
 describe('HeaderActionsDropdown', () => {
   const props = {
@@ -50,46 +53,50 @@ describe('HeaderActionsDropdown', () => {
     updateCss: () => {},
     userCanEdit: false,
     userCanSave: false,
+    lastModifiedTime: 0,
   };
 
   function setup(overrideProps) {
     const wrapper = shallow(
       <HeaderActionsDropdown {...props} {...overrideProps} />,
     );
-    return wrapper;
+    const menu = shallow(
+      <div>{wrapper.find(NoAnimationDropdown).props().overlay}</div>,
+    );
+    return { wrapper, menu };
   }
 
   describe('readonly-user', () => {
     const overrideProps = { userCanSave: false };
 
     it('should render the DropdownButton', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(DropdownButton)).toExist();
+      const { wrapper } = setup(overrideProps);
+      expect(wrapper.find(NoAnimationDropdown)).toExist();
     });
 
     it('should not render the SaveModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(SaveModal)).not.toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(SaveModal)).not.toExist();
     });
 
-    it('should render four MenuItems', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(MenuItem)).toHaveLength(4);
+    it('should render available Menu items', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(Menu.Item)).toHaveLength(4);
     });
 
     it('should render the RefreshIntervalModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(RefreshIntervalModal)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(RefreshIntervalModal)).toExist();
     });
 
-    it('should render the URLShortLinkModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(URLShortLinkModal)).toExist();
+    it('should render the ShareMenuItems', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(ShareMenuItems)).toExist();
     });
 
     it('should not render the CssEditor', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(CssEditor)).not.toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(CssEditor)).not.toExist();
     });
   });
 
@@ -97,33 +104,33 @@ describe('HeaderActionsDropdown', () => {
     const overrideProps = { userCanSave: true };
 
     it('should render the DropdownButton', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(DropdownButton)).toExist();
+      const { wrapper } = setup(overrideProps);
+      expect(wrapper.find(NoAnimationDropdown)).toExist();
     });
 
     it('should render the SaveModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(SaveModal)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(SaveModal)).toExist();
     });
 
-    it('should render four MenuItems', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(MenuItem)).toHaveLength(4);
+    it('should render available Menu items', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(Menu.Item)).toHaveLength(5);
     });
 
     it('should render the RefreshIntervalModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(RefreshIntervalModal)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(RefreshIntervalModal)).toExist();
     });
 
-    it('should render the URLShortLinkModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(URLShortLinkModal)).toExist();
+    it('should render the ShareMenuItems', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(ShareMenuItems)).toExist();
     });
 
     it('should not render the CssEditor', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(CssEditor)).not.toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(CssEditor)).not.toExist();
     });
   });
 
@@ -131,33 +138,33 @@ describe('HeaderActionsDropdown', () => {
     const overrideProps = { userCanSave: true, editMode: true };
 
     it('should render the DropdownButton', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(DropdownButton)).toExist();
+      const { wrapper } = setup(overrideProps);
+      expect(wrapper.find(NoAnimationDropdown)).toExist();
     });
 
     it('should render the SaveModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(SaveModal)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(SaveModal)).toExist();
     });
 
-    it('should render three MenuItems', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(MenuItem)).toHaveLength(3);
+    it('should render available MenuItems', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(Menu.Item)).toHaveLength(6);
     });
 
     it('should render the RefreshIntervalModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(RefreshIntervalModal)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(RefreshIntervalModal)).toExist();
     });
 
-    it('should render the URLShortLinkModal', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(URLShortLinkModal)).toExist();
+    it('should render the ShareMenuItems', () => {
+      const { menu } = setup(overrideProps);
+      expect(menu.find(ShareMenuItems)).toExist();
     });
 
     it('should render the CssEditor', () => {
-      const wrapper = setup(overrideProps);
-      expect(wrapper.find(CssEditor)).toExist();
+      const { menu } = setup(overrideProps);
+      expect(menu.find(CssEditor)).toExist();
     });
   });
 });

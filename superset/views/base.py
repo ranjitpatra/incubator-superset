@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import dataclasses
+import dataclasses  # pylint: disable=wrong-import-order
 import functools
 import logging
 import traceback
@@ -47,13 +47,14 @@ from superset import (
     security_manager,
 )
 from superset.connectors.sqla import models
+from superset.datasets.commands.exceptions import get_dataset_exist_error_msg
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
+    SupersetErrorException,
     SupersetException,
     SupersetSecurityException,
-    SupersetTimeoutException,
 )
-from superset.models.helpers import ImportMixin
+from superset.models.helpers import ImportExportMixin
 from superset.translations.utils import get_language_pack
 from superset.typing import FlaskResponse
 from superset.utils import core as utils
@@ -70,12 +71,17 @@ FRONTEND_CONF_KEYS = (
     "SUPERSET_DASHBOARD_POSITION_DATA_LIMIT",
     "SUPERSET_DASHBOARD_PERIODICAL_REFRESH_LIMIT",
     "SUPERSET_DASHBOARD_PERIODICAL_REFRESH_WARNING_MESSAGE",
+    "DISABLE_DATASET_SOURCE_EDIT",
     "ENABLE_JAVASCRIPT_CONTROLS",
     "DEFAULT_SQLLAB_LIMIT",
     "SQL_MAX_ROW",
     "SUPERSET_WEBSERVER_DOMAINS",
     "SQLLAB_SAVE_WARNING_MESSAGE",
     "DISPLAY_MAX_ROW",
+    "GLOBAL_ASYNC_QUERIES_TRANSPORT",
+    "GLOBAL_ASYNC_QUERIES_POLLING_DELAY",
+    "SQLALCHEMY_DOCS_URL",
+    "SQLALCHEMY_DISPLAY_TEXT",
 )
 logger = logging.getLogger(__name__)
 
@@ -180,7 +186,7 @@ def handle_api_exception(
             return json_errors_response(
                 errors=[ex.error], status=ex.status, payload=ex.payload
             )
-        except SupersetTimeoutException as ex:
+        except SupersetErrorException as ex:
             logger.warning(ex)
             return json_errors_response(errors=[ex.error], status=ex.status)
         except SupersetException as ex:
@@ -200,10 +206,6 @@ def handle_api_exception(
     return functools.update_wrapper(wraps, f)
 
 
-def get_datasource_exist_error_msg(full_name: str) -> str:
-    return __("Datasource %(name)s already exists", name=full_name)
-
-
 def validate_sqlatable(table: models.SqlaTable) -> None:
     """Checks the table existence in the database."""
     with db.session.no_autoflush:
@@ -213,7 +215,7 @@ def validate_sqlatable(table: models.SqlaTable) -> None:
             models.SqlaTable.database_id == table.database.id,
         )
         if db.session.query(table_query.exists()).scalar():
-            raise Exception(get_datasource_exist_error_msg(table.full_name))
+            raise Exception(get_dataset_exist_error_msg(table.full_name))
 
     # Fail before adding if the table can't be found
     try:
@@ -243,6 +245,11 @@ def get_user_roles() -> List[Role]:
     return g.user.roles
 
 
+def is_user_admin() -> bool:
+    user_roles = [role.name.lower() for role in list(get_user_roles())]
+    return "admin" in user_roles
+
+
 class BaseSupersetView(BaseView):
     @staticmethod
     def json_response(
@@ -254,25 +261,22 @@ class BaseSupersetView(BaseView):
             mimetype="application/json",
         )
 
+    def render_app_template(self) -> FlaskResponse:
+        payload = {
+            "user": bootstrap_user_data(g.user),
+            "common": common_bootstrap_payload(),
+        }
+        return self.render_template(
+            "superset/crud_views.html",
+            entry="crudViews",
+            bootstrap_data=json.dumps(
+                payload, default=utils.pessimistic_json_iso_dttm_ser
+            ),
+        )
+
 
 def menu_data() -> Dict[str, Any]:
     menu = appbuilder.menu.get_data()
-    root_path = "#"
-    logo_target_path = ""
-    if not g.user.is_anonymous:
-        try:
-            logo_target_path = (
-                appbuilder.app.config["LOGO_TARGET_PATH"]
-                or f"/profile/{g.user.username}/"
-            )
-        # when user object has no username
-        except NameError as ex:
-            logger.exception(ex)
-
-        if logo_target_path.startswith("/"):
-            root_path = f"/superset{logo_target_path}"
-        else:
-            root_path = logo_target_path
 
     languages = {}
     for lang in appbuilder.languages:
@@ -283,7 +287,7 @@ def menu_data() -> Dict[str, Any]:
     return {
         "menu": menu,
         "brand": {
-            "path": root_path,
+            "path": appbuilder.app.config["LOGO_TARGET_PATH"] or "/",
             "icon": appbuilder.app_icon,
             "alt": appbuilder.app_name,
             "width": appbuilder.app.config["APP_ICON_WIDTH"],
@@ -299,6 +303,9 @@ def menu_data() -> Dict[str, Any]:
             "user_info_url": appbuilder.get_url_for_userinfo,
             "user_logout_url": appbuilder.get_url_for_logout,
             "user_login_url": appbuilder.get_url_for_login,
+            "user_profile_url": None
+            if g.user.is_anonymous
+            else f"/superset/profile/{g.user.username}",
             "locale": session.get("locale", "en"),
         },
     }
@@ -315,6 +322,9 @@ def common_bootstrap_payload() -> Dict[str, Any]:
         "locale": locale,
         "language_pack": get_language_pack(locale),
         "feature_flags": get_feature_flags(),
+        "extra_sequential_color_schemes": conf["EXTRA_SEQUENTIAL_COLOR_SCHEMES"],
+        "extra_categorical_color_schemes": conf["EXTRA_CATEGORICAL_COLOR_SCHEMES"],
+        "theme_overrides": conf["THEME_OVERRIDES"],
         "menu_data": menu_data(),
     }
 
@@ -378,7 +388,7 @@ class YamlExportMixin:  # pylint: disable=too-few-public-methods
 
     @action("yaml_export", __("Export to YAML"), __("Export to YAML?"), "fa-download")
     def yaml_export(
-        self, items: Union[ImportMixin, List[ImportMixin]]
+        self, items: Union[ImportExportMixin, List[ImportExportMixin]]
     ) -> FlaskResponse:
         if not isinstance(items, list):
             items = [items]
@@ -395,11 +405,11 @@ class YamlExportMixin:  # pylint: disable=too-few-public-methods
 class DeleteMixin:  # pylint: disable=too-few-public-methods
     def _delete(self: BaseView, primary_key: int) -> None:
         """
-            Delete function logic, override to implement diferent logic
-            deletes the record with primary_key = primary_key
+        Delete function logic, override to implement diferent logic
+        deletes the record with primary_key = primary_key
 
-            :param primary_key:
-                record primary key to delete
+        :param primary_key:
+            record primary key to delete
         """
         item = self.datamodel.get(primary_key, self._base_filters)
         if not item:
@@ -495,8 +505,7 @@ def check_ownership(obj: Any, raise_if_false: bool = True) -> bool:
         if raise_if_false:
             raise security_exception
         return False
-    roles = [r.name for r in get_user_roles()]
-    if "Admin" in roles:
+    if is_user_admin():
         return True
     scoped_session = db.create_scoped_session()
     orig_obj = scoped_session.query(obj.__class__).filter_by(id=obj.id).first()

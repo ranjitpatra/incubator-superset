@@ -20,18 +20,19 @@
 import React from 'react';
 import sinon from 'sinon';
 import { shallow } from 'enzyme';
-import { Popover, Tab, Tabs } from 'react-bootstrap';
 import Button from 'src/components/Button';
 
+import ErrorBoundary from 'src/components/ErrorBoundary';
+import Tabs from 'src/common/components/Tabs';
 import AdhocFilter, {
   EXPRESSION_TYPES,
   CLAUSES,
-} from 'src/explore/AdhocFilter';
-import AdhocMetric from 'src/explore/AdhocMetric';
-import AdhocFilterEditPopover from 'src/explore/components/AdhocFilterEditPopover';
-import AdhocFilterEditPopoverSimpleTabContent from 'src/explore/components/AdhocFilterEditPopoverSimpleTabContent';
-import AdhocFilterEditPopoverSqlTabContent from 'src/explore/components/AdhocFilterEditPopoverSqlTabContent';
+} from 'src/explore/components/controls/FilterControl/AdhocFilter';
 import { AGGREGATES } from 'src/explore/constants';
+import AdhocFilterEditPopover from 'src/explore/components/controls/FilterControl/AdhocFilterEditPopover';
+import AdhocFilterEditPopoverSimpleTabContent from 'src/explore/components/controls/FilterControl/AdhocFilterEditPopoverSimpleTabContent';
+import AdhocFilterEditPopoverSqlTabContent from 'src/explore/components/controls/FilterControl/AdhocFilterEditPopoverSqlTabContent';
+import AdhocMetric from 'src/explore/components/controls/MetricControl/AdhocMetric';
 
 const simpleAdhocFilter = new AdhocFilter({
   expressionType: EXPRESSION_TYPES.SIMPLE,
@@ -44,6 +45,14 @@ const simpleAdhocFilter = new AdhocFilter({
 const sqlAdhocFilter = new AdhocFilter({
   expressionType: EXPRESSION_TYPES.SQL,
   sqlExpression: 'value > 10',
+  clause: CLAUSES.WHERE,
+});
+
+const faultyAdhocFilter = new AdhocFilter({
+  expressionType: null,
+  subject: null,
+  operator: '>',
+  comparator: '10',
   clause: CLAUSES.WHERE,
 });
 
@@ -81,9 +90,8 @@ function setup(overrides) {
 describe('AdhocFilterEditPopover', () => {
   it('renders simple tab content by default', () => {
     const { wrapper } = setup();
-    expect(wrapper.find(Popover)).toExist();
     expect(wrapper.find(Tabs)).toExist();
-    expect(wrapper.find(Tab)).toHaveLength(2);
+    expect(wrapper.find(Tabs.TabPane)).toHaveLength(2);
     expect(wrapper.find(Button)).toHaveLength(2);
     expect(wrapper.find(AdhocFilterEditPopoverSimpleTabContent)).toHaveLength(
       1,
@@ -92,11 +100,18 @@ describe('AdhocFilterEditPopover', () => {
 
   it('renders sql tab content when the adhoc filter expressionType is sql', () => {
     const { wrapper } = setup({ adhocFilter: sqlAdhocFilter });
-    expect(wrapper.find(Popover)).toExist();
     expect(wrapper.find(Tabs)).toExist();
-    expect(wrapper.find(Tab)).toHaveLength(2);
+    expect(wrapper.find(Tabs.TabPane)).toHaveLength(2);
     expect(wrapper.find(Button)).toHaveLength(2);
     expect(wrapper.find(AdhocFilterEditPopoverSqlTabContent)).toExist();
+  });
+
+  it('renders simple and sql tabs with ErrorBoundary instead of content', () => {
+    const { wrapper } = setup({ adhocFilter: faultyAdhocFilter });
+    expect(wrapper.find(Tabs)).toExist();
+    expect(wrapper.find(Tabs.TabPane)).toHaveLength(2);
+    expect(wrapper.find(Button)).toHaveLength(2);
+    expect(wrapper.find(ErrorBoundary)).toHaveLength(2);
   });
 
   it('overwrites the adhocFilter in state with onAdhocFilterChange', () => {
@@ -128,9 +143,9 @@ describe('AdhocFilterEditPopover', () => {
     wrapper.instance().onDragDown = sinon.spy();
     wrapper.instance().forceUpdate();
 
-    expect(wrapper.find('i.fa-expand')).toExist();
+    expect(wrapper.find('.fa-expand')).toExist();
     expect(wrapper.instance().onDragDown.calledOnce).toBe(false);
-    wrapper.find('i.fa-expand').simulate('mouseDown', {});
+    wrapper.find('.fa-expand').simulate('mouseDown', {});
     expect(wrapper.instance().onDragDown.calledOnce).toBe(true);
   });
 });

@@ -19,7 +19,8 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import Button from 'src/components/Button';
-import { t } from '@superset-ui/core';
+import { t, styled, css } from '@superset-ui/core';
+import Collapse from 'src/common/components/Collapse';
 import TableElement from './TableElement';
 import TableSelector from '../../components/TableSelector';
 
@@ -38,6 +39,15 @@ const defaultProps = {
   offline: false,
   tables: [],
 };
+
+const StyledScrollbarContainer = styled.div`
+  flex: 1 1 auto;
+  overflow: auto;
+`;
+
+const StyledScrollbarContent = styled.div`
+  height: ${props => props.contentHeight}px;
+`;
 
 export default class SqlEditorLeftBar extends React.PureComponent {
   constructor(props) {
@@ -71,6 +81,10 @@ export default class SqlEditorLeftBar extends React.PureComponent {
 
   onDbChange(db) {
     this.props.actions.queryEditorSetDb(this.props.queryEditor, db.id);
+    this.props.actions.queryEditorSetFunctionNames(
+      this.props.queryEditor,
+      db.id,
+    );
   }
 
   onTableChange(tableName, schemaName) {
@@ -109,10 +123,6 @@ export default class SqlEditorLeftBar extends React.PureComponent {
     this.props.actions.addTable(this.props.queryEditor, tableName, schemaName);
   }
 
-  closePopover(ref) {
-    this.refs[ref].hide();
-  }
-
   render() {
     const shouldShowReset = window.location.search === '?reset=1';
     const tableMetaDataHeight = this.props.height - 130; // 130 is the height of the selects above
@@ -134,27 +144,49 @@ export default class SqlEditorLeftBar extends React.PureComponent {
           tableNameSticky={false}
         />
         <div className="divider" />
-        <div className="scrollbar-container">
-          <div
-            className="scrollbar-content"
-            style={{ height: tableMetaDataHeight }}
-          >
-            {this.props.tables.map(table => (
-              <TableElement
-                table={table}
-                key={table.id}
-                actions={this.props.actions}
-              />
-            ))}
-          </div>
-        </div>
+        <StyledScrollbarContainer>
+          <StyledScrollbarContent contentHeight={tableMetaDataHeight}>
+            <Collapse
+              ghost
+              expandIconPosition="right"
+              css={theme => css`
+                .ant-collapse-item {
+                  margin-bottom: ${theme.gridUnit * 3}px;
+                }
+                .ant-collapse-header {
+                  padding: 0px !important;
+                  display: flex;
+                  align-items: center;
+                }
+                .ant-collapse-content-box {
+                  padding: 0px ${theme.gridUnit * 4}px 0px 0px !important;
+                }
+                .ant-collapse-arrow {
+                  top: ${theme.gridUnit * 2}px !important;
+                  color: ${theme.colors.primary.dark1} !important;
+                  &: hover {
+                    color: ${theme.colors.primary.dark2} !important;
+                  }
+                }
+              `}
+            >
+              {this.props.tables.map(table => (
+                <TableElement
+                  table={table}
+                  key={table.id}
+                  actions={this.props.actions}
+                />
+              ))}
+            </Collapse>
+          </StyledScrollbarContent>
+        </StyledScrollbarContainer>
         {shouldShowReset && (
           <Button
             buttonSize="small"
             buttonStyle="danger"
             onClick={this.resetState}
           >
-            <i className="fa fa-bomb" /> {t('Reset State')}
+            <i className="fa fa-bomb" /> {t('Reset state')}
           </Button>
         )}
       </div>

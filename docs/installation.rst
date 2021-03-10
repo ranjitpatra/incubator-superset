@@ -86,15 +86,15 @@ supported.)
 
 **Step 1 - Clone Superset's Github repository**
 
-`Clone Superset's repo <https://github.com/apache/incubator-superset>`__
+`Clone Superset's repo <https://github.com/apache/superset>`__
 in your terminal with the following command:
 
 .. code:: bash
 
-    $ git clone https://github.com/apache/incubator-superset.git
+    $ git clone https://github.com/apache/superset.git
 
 Once that command completes successfully, you should see a new
-``incubator-superset`` folder in your current directory.
+``superset`` folder in your current directory.
 
 **Step 2 - Launch Superset via `docker-compose up`**
 
@@ -102,7 +102,7 @@ Next, `cd` into the folder you created in Step 1:
 
 .. code:: bash
 
-    $ cd incubator-superset
+    $ cd superset
 
 Once you're in the directory, run the following command:
 
@@ -135,7 +135,7 @@ Congrats! You have successfully installed Superset!
 .. note ::
     The Docker-related files and documentation are actively maintained and
     managed by the core committers working on the project. Help and contributions
-    around Docker are welcomed! See also `docker/README.md <https://github.com/apache/incubator-superset/blob/master/docker/README.md>`_ for additional information.
+    around Docker are welcomed! See also `docker/README.md <https://github.com/apache/superset/blob/master/docker/README.md>`_ for additional information.
 
 OS dependencies
 ---------------
@@ -276,23 +276,6 @@ server (`superset run` or `flask run`) is not intended for production use.
 If not using gunicorn, you may want to disable the use of flask-compress
 by setting `COMPRESS_REGISTER = False` in your `superset_config.py`
 
-Flask-AppBuilder Permissions
-----------------------------
-
-By default, every time the Flask-AppBuilder (FAB) app is initialized the
-permissions and views are added automatically to the backend and associated with
-the ‘Admin’ role. The issue, however, is when you are running multiple concurrent
-workers this creates a lot of contention and race conditions when defining
-permissions and views.
-
-To alleviate this issue, the automatic updating of permissions can be disabled
-by setting `FAB_UPDATE_PERMS = False` (defaults to True).
-
-In a production environment initialization could take on the following form:
-
-  superset init
-  gunicorn -w 10 ... superset:app
-
 Configuration behind a load balancer
 ------------------------------------
 
@@ -351,7 +334,7 @@ of the parameters you can copy / paste in that configuration module: ::
     MAPBOX_API_KEY = ''
 
 All the parameters and default values defined in
-https://github.com/apache/incubator-superset/blob/master/superset/config.py
+https://github.com/apache/superset/blob/master/superset/config.py
 can be altered in your local ``superset_config.py`` .
 Administrators will want to
 read through the file to understand what can be configured locally
@@ -384,8 +367,8 @@ Caching
 
 Superset uses `Flask-Cache <https://pythonhosted.org/Flask-Cache/>`_ for
 caching purpose. Configuring your caching backend is as easy as providing
-a ``CACHE_CONFIG``, constant in your ``superset_config.py`` that
-complies with the Flask-Cache specifications.
+``CACHE_CONFIG`` and ``DATA_CACHE_CONFIG`, constants in ``superset_config.py``
+that complies with `the Flask-Cache specifications <https://flask-caching.readthedocs.io/en/latest/#configuring-flask-caching>`_.
 
 Flask-Cache supports multiple caching backends (Redis, Memcached,
 SimpleCache (in-memory), or the local filesystem). If you are going to use
@@ -395,14 +378,13 @@ the `redis <https://pypi.python.org/pypi/redis>`_ Python package: ::
 
     pip install redis
 
-For setting your timeouts, this is done in the Superset metadata and goes
-up the "timeout searchpath", from your slice configuration, to your
-data source's configuration, to your database's and ultimately falls back
-into your global default defined in ``CACHE_CONFIG``.
+For chart data, Superset goes up a “timeout search path”, from a slice's configuration
+to the datasource’s, the database’s, then ultimately falls back to the global default
+defined in ``DATA_CACHE_CONFIG``.
 
 .. code-block:: python
 
-    CACHE_CONFIG = {
+    DATA_CACHE_CONFIG = {
         'CACHE_TYPE': 'redis',
         'CACHE_DEFAULT_TIMEOUT': 60 * 60 * 24, # 1 day default (in secs)
         'CACHE_KEY_PREFIX': 'superset_results',
@@ -417,7 +399,7 @@ object that is compatible with the `Flask-Cache <https://pythonhosted.org/Flask-
 
     from custom_caching import CustomCache
 
-    def init_cache(app):
+    def init_data_cache(app):
         """Takes an app instance and returns a custom cache backend"""
         config = {
             'CACHE_DEFAULT_TIMEOUT': 60 * 60 * 24, # 1 day default (in secs)
@@ -425,7 +407,7 @@ object that is compatible with the `Flask-Cache <https://pythonhosted.org/Flask-
         }
         return CustomCache(app, config)
 
-    CACHE_CONFIG = init_cache
+    DATA_CACHE_CONFIG = init_data_cache
 
 Superset has a Celery task that will periodically warm up the cache based on
 different strategies. To use it, add the following to the `CELERYBEAT_SCHEDULE`
@@ -551,6 +533,8 @@ Here's a list of some of the recommended packages.
 | Apache Pinot     | ``"apache-superset[pinot]"``                                      | ``pinot+http://CONTROLLER:5436/``               |
 |                  |                                                                   | ``query?server=http://CONTROLLER:5983/``        |
 +------------------+-------------------------------------------------------------------+-------------------------------------------------+
+| Apache Solr      | ``pip install sqlalchemy-solr``                                   | ``solr://``                                     |
++------------------+---------------------------------------+-----------------------------------------------------------------------------+
 | Apache Spark SQL | ``"apache-superset[hive]"``                                       | ``jdbc+hive://``                                |
 +------------------+-------------------------------------------------------------------+-------------------------------------------------+
 | BigQuery         | ``"apache-superset[bigquery]"``                                   | ``bigquery://``                                 |
@@ -703,6 +687,13 @@ You should then be able to connect to your BigQuery datasets.
 To be able to upload data, e.g. sample data, the python library `pandas_gbq` is required.
 
 
+Apache Solr
+------------
+
+The connection string for Apache Solr looks like this ::
+
+    solr://{username}:{password}@{host}:{port}/{server_path}/{collection}[/?use_ssl=true|false]
+
 Elasticsearch
 -------------
 
@@ -830,7 +821,7 @@ there's a **schema** parameter you can set in the table form.
 External Password store for SQLAlchemy connections
 --------------------------------------------------
 It is possible to use an external store for you database passwords. This is
-useful if you a running a custom secret distribution framework and do not wish
+useful if you are running a custom secret distribution framework and do not wish
 to store secrets in Superset's meta database.
 
 Example:
@@ -949,7 +940,7 @@ Domain Sharding
 
 Chrome allows up to 6 open connections per domain at a time. When there are more
 than 6 slices in dashboard, a lot of time fetch requests are queued up and wait for
-next available socket. `PR 5039 <https://github.com/apache/incubator-superset/pull/5039>`_ adds domain sharding to Superset,
+next available socket. `PR 5039 <https://github.com/apache/superset/pull/5039>`_ adds domain sharding to Superset,
 and this feature will be enabled by configuration only (by default Superset
 doesn't allow cross-domain request).
 
@@ -1122,6 +1113,32 @@ serialization. This can be disabled by setting ``RESULTS_BACKEND_USE_MSGPACK = F
 in your configuration, should any issues arise. Please clear your existing results
 cache store when upgrading an existing environment.
 
+**Async queries for dashboards and Explore**
+
+It's also possible to configure database queries for charts to operate in `async` mode.
+This is especially useful for dashboards with many charts that may otherwise be affected
+by browser connection limits. To enable async queries for dashboards and Explore, the
+following dependencies are required:
+
+- Redis 5.0+ (the feature utilizes `Redis Streams <https://redis.io/topics/streams-intro>`_)
+- Cache backends enabled via the ``CACHE_CONFIG`` and ``DATA_CACHE_CONFIG`` config settings
+- Celery workers configured and running to process async tasks
+
+The following configuration settings are available for async queries (see config.py for default values)
+
+- ``GLOBAL_ASYNC_QUERIES`` (feature flag) - enable or disable async query operation
+- ``GLOBAL_ASYNC_QUERIES_REDIS_CONFIG`` - Redis connection info
+- ``GLOBAL_ASYNC_QUERIES_REDIS_STREAM_PREFIX`` - the prefix used with Redis Streams
+- ``GLOBAL_ASYNC_QUERIES_REDIS_STREAM_LIMIT`` - the maximum number of events for each user-specific event stream (FIFO eviction)
+- ``GLOBAL_ASYNC_QUERIES_REDIS_STREAM_LIMIT_FIREHOSE`` - the maximum number of events for all users (FIFO eviction)
+- ``GLOBAL_ASYNC_QUERIES_JWT_COOKIE_NAME`` - the async query feature uses a `JWT <https://tools.ietf.org/html/rfc7519>`_ cookie for authentication, this setting is the cookie's name
+- ``GLOBAL_ASYNC_QUERIES_JWT_COOKIE_SECURE`` - JWT cookie secure option
+- ``GLOBAL_ASYNC_QUERIES_JWT_SECRET`` - JWT's use a secret key to sign and validate the contents. This value should be at least 32 bytes and have sufficient randomness for proper security
+- ``GLOBAL_ASYNC_QUERIES_TRANSPORT`` - currently the only available option is (HTTP) `polling`, but support for a WebSocket will be added in future versions
+- ``GLOBAL_ASYNC_QUERIES_POLLING_DELAY`` - the time (in ms) between polling requests
+
+More information on the async query feature can be found in `SIP-39 <https://github.com/apache/superset/issues/9190>`_.
+
 **Important notes**
 
 * It is important that all the worker nodes and web servers in
@@ -1154,6 +1171,7 @@ Make sure you enable email reports in your configuration file
 
     ENABLE_SCHEDULED_EMAIL_REPORTS = True
 
+This flag enables some permissions that are stored in your database, so you'll want to run `superset init` again if you are running this in a dev environment.
 Now you will find two new items in the navigation bar that allow you to schedule email
 reports
 
@@ -1421,7 +1439,7 @@ Building from source
 
 More advanced users may want to build Superset from sources. That
 would be the case if you fork the project to add features specific to
-your environment. See `CONTRIBUTING.md#setup-local-environment-for-development <https://github.com/apache/incubator-superset/blob/master/CONTRIBUTING.md#setup-local-environment-for-development>`_.
+your environment. See `CONTRIBUTING.md#setup-local-environment-for-development <https://github.com/apache/superset/blob/master/CONTRIBUTING.md#setup-local-environment-for-development>`_.
 
 Blueprints
 ----------
@@ -1563,7 +1581,7 @@ Here is a list of flags and descriptions:
 
   * For some security concerns, you may need to enforce CSRF protection on all query request to explore_json endpoint. In Superset, we use `flask-csrf <https://sjl.bitbucket.io/flask-csrf/>`_ add csrf protection for all POST requests, but this protection doesn't apply to GET method.
 
-  * When ENABLE_EXPLORE_JSON_CSRF_PROTECTION is set to true, your users cannot make GET request to explore_json. The default value for this feature False (current behavior), explore_json accepts both GET and POST request. See `PR 7935 <https://github.com/apache/incubator-superset/pull/7935>`_ for more details.
+  * When ENABLE_EXPLORE_JSON_CSRF_PROTECTION is set to true, your users cannot make GET request to explore_json. The default value for this feature False (current behavior), explore_json accepts both GET and POST request. See `PR 7935 <https://github.com/apache/superset/pull/7935>`_ for more details.
 
 * PRESTO_EXPAND_DATA
 
@@ -1573,7 +1591,7 @@ Here is a list of flags and descriptions:
 SIP-15
 ------
 
-`SIP-15 <https://github.com/apache/incubator-superset/issues/6360>`_ aims to ensure that time intervals are handled in a consistent and transparent manner for both the Druid and SQLAlchemy connectors.
+`SIP-15 <https://github.com/apache/superset/issues/6360>`_ aims to ensure that time intervals are handled in a consistent and transparent manner for both the Druid and SQLAlchemy connectors.
 
 Prior to SIP-15 SQLAlchemy used inclusive endpoints however these may behave like exclusive for string columns (due to lexicographical ordering) if no formatting was defined and the column formatting did not conform to an ISO 8601 date-time (refer to the SIP for details).
 
