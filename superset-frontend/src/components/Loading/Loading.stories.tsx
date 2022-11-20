@@ -40,7 +40,7 @@ export const LoadingGallery = () => (
         }}
       >
         <h4>{position}</h4>
-        <Loading position={position} image="/images/loading.gif" />
+        <Loading position={position} />
       </div>
     ))}
   </>
@@ -71,7 +71,7 @@ InteractiveLoading.story = {
 };
 
 InteractiveLoading.args = {
-  image: '/images/loading.gif',
+  image: '',
   className: '',
 };
 

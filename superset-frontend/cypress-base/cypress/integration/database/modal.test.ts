@@ -16,57 +16,66 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { DATABASE_LIST } from './helper';
+import { DATABASE_LIST } from 'cypress/utils/urls';
+
+function closeModal() {
+  cy.get('body').then($body => {
+    if ($body.find('[data-test="database-modal"]').length) {
+      cy.get('[aria-label="Close"]').eq(1).click();
+    }
+  });
+}
 
 describe('Add database', () => {
-  beforeEach(() => {
-    cy.login();
-  });
-
-  it('should keep create modal open when error', () => {
+  before(() => {
     cy.visit(DATABASE_LIST);
-
-    // open modal
-    cy.get('[data-test="btn-create-database"]').click();
-
-    // type values
-    cy.get('[data-test="database-modal"] input[name="database_name"]')
-      .focus()
-      .type('cypress');
-    cy.get('[data-test="database-modal"] input[name="sqlalchemy_uri"]')
-      .focus()
-      .type('bad_db_uri');
-
-    // click save
-    cy.get('[data-test="modal-confirm-button"]:not(:disabled)').click();
-
-    // should show error alerts and keep modal open
-    cy.get('.toast').contains('error');
-    cy.wait(1000); // wait for potential (incorrect) closing annimation
-    cy.get('[data-test="database-modal"]').should('be.visible');
-
-    // should be able to close modal
-    cy.get('[data-test="modal-cancel-button"]').click();
-    cy.get('[data-test="database-modal"]').should('not.be.visible');
   });
 
-  it('should keep update modal open when error', () => {
-    // open modal
-    cy.get('[data-test="database-edit"]:last').click();
+  beforeEach(() => {
+    cy.preserveLogin();
+    closeModal();
+    cy.getBySel('btn-create-database').click();
+  });
 
-    cy.get('[data-test="database-modal"]:last input[name="sqlalchemy_uri"]')
-      .focus()
-      .dblclick()
-      .type('{selectall}{backspace}bad_uri');
+  it('should open dynamic form', () => {
+    // click postgres dynamic form
+    cy.get('.preferred > :nth-child(1)').click();
 
-    // click save
-    cy.get('[data-test="modal-confirm-button"]:not(:disabled)').click();
+    // make sure all the fields are rendering
+    cy.get('input[name="host"]').should('have.value', '');
+    cy.get('input[name="port"]').should('have.value', '');
+    cy.get('input[name="database"]').should('have.value', '');
+    cy.get('input[name="password"]').should('have.value', '');
+    cy.get('input[name="database_name"]').should('have.value', '');
+  });
 
-    // should show error alerts
-    cy.get('.toast').contains('error').should('be.visible');
+  it('should open sqlalchemy form', () => {
+    // click postgres dynamic form
+    cy.get('.preferred > :nth-child(1)').click();
 
-    // modal should still be open
-    cy.wait(1000); // wait for potential (incorrect) closing annimation
-    cy.get('[data-test="database-modal"]').should('be.visible');
+    cy.getBySel('sqla-connect-btn').click();
+
+    // check if the sqlalchemy form is showing up
+    cy.getBySel('database-name-input').should('be.visible');
+    cy.getBySel('sqlalchemy-uri-input').should('be.visible');
+  });
+
+  it('show error alerts on dynamic form for bad host', () => {
+    // click postgres dynamic form
+    cy.get('.preferred > :nth-child(1)').click();
+    cy.get('input[name="host"]').focus().type('badhost');
+    cy.get('input[name="port"]').focus().type('5432');
+    cy.get('.ant-form-item-explain-error').contains(
+      "The hostname provided can't be resolved",
+    );
+  });
+
+  it('show error alerts on dynamic form for bad port', () => {
+    // click postgres dynamic form
+    cy.get('.preferred > :nth-child(1)').click();
+    cy.get('input[name="host"]').focus().type('localhost');
+    cy.get('input[name="port"]').focus().type('123');
+    cy.get('input[name="database"]').focus();
+    cy.get('.ant-form-item-explain-error').contains('The port is closed');
   });
 });

@@ -16,17 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { RefObject } from 'react';
 import {
-  QueryFormData,
-  DataRecord,
-  SetDataMaskHook,
   Behavior,
+  DataRecord,
+  FilterState,
+  QueryFormData,
 } from '@superset-ui/core';
-import { PluginFilterStylesProps } from '../types';
+import { PluginFilterHooks, PluginFilterStylesProps } from '../types';
 
 interface PluginFilterTimeCustomizeProps {
   defaultValue?: string | null;
-  currentValue?: string | null;
 }
 
 export type PluginFilterSelectQueryFormData = QueryFormData &
@@ -36,11 +36,11 @@ export type PluginFilterSelectQueryFormData = QueryFormData &
 export type PluginFilterTimeProps = PluginFilterStylesProps & {
   behaviors: Behavior[];
   data: DataRecord[];
-  setDataMask: SetDataMaskHook;
   formData: PluginFilterSelectQueryFormData;
-};
+  filterState: FilterState;
+  inputRef: RefObject<HTMLInputElement>;
+} & PluginFilterHooks;
 
 export const DEFAULT_FORM_DATA: PluginFilterTimeCustomizeProps = {
   defaultValue: null,
-  currentValue: null,
 };

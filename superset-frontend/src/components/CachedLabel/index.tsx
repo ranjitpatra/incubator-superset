@@ -19,16 +19,16 @@
 import React, { useState } from 'react';
 import { t } from '@superset-ui/core';
 import Label from 'src/components/Label';
-import { Tooltip } from 'src/common/components/Tooltip';
+import { Tooltip } from 'src/components/Tooltip';
 import { TooltipContent } from './TooltipContent';
 
-interface Props {
+export interface CacheLabelProps {
   onClick?: React.MouseEventHandler<HTMLElement>;
   cachedTimestamp?: string;
   className?: string;
 }
 
-const CacheLabel: React.FC<Props> = ({
+const CacheLabel: React.FC<CacheLabelProps> = ({
   className,
   onClick,
   cachedTimestamp,
@@ -48,7 +48,7 @@ const CacheLabel: React.FC<Props> = ({
         onMouseOver={() => setHovered(true)}
         onMouseOut={() => setHovered(false)}
       >
-        {t('cached')} <i className="fa fa-refresh" />
+        {t('Cached')} <i className="fa fa-refresh" />
       </Label>
     </Tooltip>
   );

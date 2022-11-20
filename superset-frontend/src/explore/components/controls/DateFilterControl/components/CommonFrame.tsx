@@ -18,10 +18,11 @@
  */
 import React from 'react';
 import { t } from '@superset-ui/core';
-import { Radio } from 'src/common/components/Radio';
+import { Radio } from 'src/components/Radio';
 import {
   COMMON_RANGE_OPTIONS,
   COMMON_RANGE_SET,
+  DATE_FILTER_TEST_KEY,
 } from 'src/explore/components/controls/DateFilterControl/utils';
 import {
   CommonRangeType,
@@ -38,7 +39,12 @@ export function CommonFrame(props: FrameComponentProps) {
 
   return (
     <>
-      <div className="section-title">{t('Configure Time Range: Last...')}</div>
+      <div
+        className="section-title"
+        data-test={DATE_FILTER_TEST_KEY.commonFrame}
+      >
+        {t('Configure Time Range: Last...')}
+      </div>
       <Radio.Group
         value={commonRange}
         onChange={(e: any) => props.onChange(e.target.value)}

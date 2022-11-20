@@ -14,36 +14,35 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import hashlib
-import json
+from __future__ import annotations
+
+import inspect
 import logging
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING, Union
 
 from flask import current_app as app, request
 from flask_caching import Cache
-from werkzeug.wrappers.etag import ETagResponseMixin
+from flask_caching.backends import NullCache
+from werkzeug.wrappers import Response
 
 from superset import db
 from superset.extensions import cache_manager
 from superset.models.cache import CacheKey
-from superset.stats_logger import BaseStatsLogger
 from superset.utils.core import json_int_dttm_ser
+from superset.utils.hashing import md5_sha_from_dict
 
-config = app.config  # type: ignore
+if TYPE_CHECKING:
+    from superset.stats_logger import BaseStatsLogger
+
+config = app.config
 stats_logger: BaseStatsLogger = config["STATS_LOGGER"]
 logger = logging.getLogger(__name__)
 
 
-# TODO: DRY up cache key code
-def json_dumps(obj: Any, sort_keys: bool = False) -> str:
-    return json.dumps(obj, default=json_int_dttm_ser, sort_keys=sort_keys)
-
-
 def generate_cache_key(values_dict: Dict[str, Any], key_prefix: str = "") -> str:
-    json_data = json_dumps(values_dict, sort_keys=True)
-    hash_str = hashlib.md5(json_data.encode("utf-8")).hexdigest()
+    hash_str = md5_sha_from_dict(values_dict, default=json_int_dttm_ser)
     return f"{key_prefix}{hash_str}"
 
 
@@ -54,7 +53,14 @@ def set_and_log_cache(
     cache_timeout: Optional[int] = None,
     datasource_uid: Optional[str] = None,
 ) -> None:
-    timeout = cache_timeout if cache_timeout else config["CACHE_DEFAULT_TIMEOUT"]
+    if isinstance(cache_instance.cache, NullCache):
+        return
+
+    timeout = (
+        cache_timeout
+        if cache_timeout is not None
+        else app.config["CACHE_DEFAULT_TIMEOUT"]
+    )
     try:
         dttm = datetime.utcnow().isoformat().split(".")[0]
         value = {**cache_value, "dttm": dttm}
@@ -89,9 +95,21 @@ def view_cache_key(*args: Any, **kwargs: Any) -> str:  # pylint: disable=unused-
 
 
 def memoized_func(
-    key: Callable[..., str] = view_cache_key, cache: Cache = cache_manager.cache,
+    key: Optional[str] = None,
+    cache: Cache = cache_manager.cache,
 ) -> Callable[..., Any]:
-    """Use this decorator to cache functions that have predefined first arg.
+    """
+    Decorator with configurable key and cache backend.
+
+        @memoized_func(key="{a}+{b}", cache=cache_manager.data_cache)
+        def sum(a: int, b: int) -> int:
+            return a + b
+
+    In the example above the result for `1+2` will be stored under the key of name "1+2",
+    in the `cache_manager.data_cache` cache.
+
+    Note: this decorator should be used only with functions that return primitives,
+    otherwise the deserialization might not work correctly.
 
     enable_cache is treated as True by default,
     except enable_cache = False is passed to the decorated function.
@@ -108,15 +126,23 @@ def memoized_func(
     """
 
     def wrap(f: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapped_f(self: Any, *args: Any, **kwargs: Any) -> Any:
+        def wrapped_f(*args: Any, **kwargs: Any) -> Any:
             if not kwargs.get("cache", True):
-                return f(self, *args, **kwargs)
+                return f(*args, **kwargs)
 
-            cache_key = key(self, *args, **kwargs)
+            if key:
+                # format the key using args/kwargs passed to the decorated function
+                signature = inspect.signature(f)
+                bound_args = signature.bind(*args, **kwargs)
+                bound_args.apply_defaults()
+                cache_key = key.format(**bound_args.arguments)
+            else:
+                cache_key = view_cache_key(*args, **kwargs)
+
             obj = cache.get(cache_key)
             if not kwargs.get("force") and obj is not None:
                 return obj
-            obj = f(self, *args, **kwargs)
+            obj = f(*args, **kwargs)
             cache.set(cache_key, obj, timeout=kwargs.get("cache_timeout"))
             return obj
 
@@ -126,7 +152,11 @@ def memoized_func(
 
 
 def etag_cache(
-    cache: Cache = cache_manager.cache, max_age: Optional[Union[int, float]] = None,
+    cache: Cache = cache_manager.cache,
+    get_last_modified: Optional[Callable[..., datetime]] = None,
+    max_age: Optional[Union[int, float]] = None,
+    raise_for_access: Optional[Callable[..., Any]] = None,
+    skip: Optional[Callable[..., bool]] = None,
 ) -> Callable[..., Any]:
     """
     A decorator for caching views and handling etag conditional requests.
@@ -145,11 +175,20 @@ def etag_cache(
 
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
-        def wrapper(*args: Any, **kwargs: Any) -> ETagResponseMixin:
+        def wrapper(*args: Any, **kwargs: Any) -> Response:
+            # Check if the user can access the resource
+            if raise_for_access:
+                try:
+                    raise_for_access(*args, **kwargs)
+                except Exception:  # pylint: disable=broad-except
+                    # If there's no access, bypass the cache and let the function
+                    # handle the response.
+                    return f(*args, **kwargs)
+
             # for POST requests we can't set cache headers, use the response
             # cache nor use conditional requests; this will still use the
             # dataframe cache in `superset/viz.py`, though.
-            if request.method == "POST":
+            if request.method == "POST" or (skip and skip(*args, **kwargs)):
                 return f(*args, **kwargs)
 
             response = None
@@ -168,13 +207,37 @@ def etag_cache(
                     raise
                 logger.exception("Exception possibly due to cache backend.")
 
+            # Check if the cache is stale. Default the content_changed_time to now
+            # if we don't know when it was last modified.
+            content_changed_time = datetime.utcnow()
+            if get_last_modified:
+                content_changed_time = get_last_modified(*args, **kwargs)
+                if (
+                    response
+                    and response.last_modified
+                    and response.last_modified.timestamp()
+                    < content_changed_time.timestamp()
+                ):
+                    # Bypass the cache if the response is stale
+                    response = None
+
             # if no response was cached, compute it using the wrapped function
             if response is None:
                 response = f(*args, **kwargs)
 
                 # add headers for caching: Last Modified, Expires and ETag
-                response.cache_control.public = True
-                response.last_modified = datetime.utcnow()
+                # always revalidate the cache if we're checking permissions or
+                # if the response was modified
+                if get_last_modified or raise_for_access:
+                    # `Cache-Control: no-cache` asks the browser to always store
+                    # the cache, but also must validate it with the server.
+                    response.cache_control.no_cache = True
+                else:
+                    # `Cache-Control: Public` asks the browser to always store
+                    # the cache.
+                    response.cache_control.public = True
+
+                response.last_modified = content_changed_time
                 expiration = max_age or ONE_YEAR  # max_age=0 also means far future
                 response.expires = response.last_modified + timedelta(
                     seconds=expiration

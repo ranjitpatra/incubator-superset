@@ -18,26 +18,24 @@ import logging
 from typing import Optional
 
 from flask_appbuilder.models.sqla import Model
-from flask_appbuilder.security.sqla.models import User
 
+from superset import security_manager
 from superset.commands.base import BaseCommand
 from superset.dao.exceptions import DAODeleteFailedError
 from superset.exceptions import SupersetSecurityException
-from superset.models.reports import ReportSchedule
 from superset.reports.commands.exceptions import (
     ReportScheduleDeleteFailedError,
     ReportScheduleForbiddenError,
     ReportScheduleNotFoundError,
 )
 from superset.reports.dao import ReportScheduleDAO
-from superset.views.base import check_ownership
+from superset.reports.models import ReportSchedule
 
 logger = logging.getLogger(__name__)
 
 
 class DeleteReportScheduleCommand(BaseCommand):
-    def __init__(self, user: User, model_id: int):
-        self._actor = user
+    def __init__(self, model_id: int):
         self._model_id = model_id
         self._model: Optional[ReportSchedule] = None
 
@@ -47,7 +45,7 @@ class DeleteReportScheduleCommand(BaseCommand):
             report_schedule = ReportScheduleDAO.delete(self._model)
         except DAODeleteFailedError as ex:
             logger.exception(ex.exception)
-            raise ReportScheduleDeleteFailedError()
+            raise ReportScheduleDeleteFailedError() from ex
         return report_schedule
 
     def validate(self) -> None:
@@ -58,6 +56,6 @@ class DeleteReportScheduleCommand(BaseCommand):
 
         # Check ownership
         try:
-            check_ownership(self._model)
-        except SupersetSecurityException:
-            raise ReportScheduleForbiddenError()
+            security_manager.raise_for_ownership(self._model)
+        except SupersetSecurityException as ex:
+            raise ReportScheduleForbiddenError() from ex

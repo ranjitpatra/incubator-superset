@@ -14,21 +14,54 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import unicodedata
 import urllib
 from typing import Any
+from urllib.parse import urlparse
 
-from flask import current_app, url_for
+from flask import current_app, request, url_for
+
+
+def get_url_host(user_friendly: bool = False) -> str:
+    if user_friendly:
+        return current_app.config["WEBDRIVER_BASEURL_USER_FRIENDLY"]
+    return current_app.config["WEBDRIVER_BASEURL"]
 
 
 def headless_url(path: str, user_friendly: bool = False) -> str:
-    base_url = (
-        current_app.config["WEBDRIVER_BASEURL_USER_FRIENDLY"]
-        if user_friendly
-        else current_app.config["WEBDRIVER_BASEURL"]
-    )
-    return urllib.parse.urljoin(base_url, path)
+    return urllib.parse.urljoin(get_url_host(user_friendly=user_friendly), path)
 
 
 def get_url_path(view: str, user_friendly: bool = False, **kwargs: Any) -> str:
     with current_app.test_request_context():
         return headless_url(url_for(view, **kwargs), user_friendly=user_friendly)
+
+
+def modify_url_query(url: str, **kwargs: Any) -> str:
+    """
+    Replace or add parameters to a URL.
+    """
+    parts = list(urllib.parse.urlsplit(url))
+    params = urllib.parse.parse_qs(parts[3])
+    for k, v in kwargs.items():
+        if not isinstance(v, list):
+            v = [v]
+        params[k] = v
+
+    parts[3] = "&".join(f"{k}={urllib.parse.quote(v[0])}" for k, v in params.items())
+    return urllib.parse.urlunsplit(parts)
+
+
+def is_safe_url(url: str) -> bool:
+    if url.startswith("///"):
+        return False
+    try:
+        ref_url = urlparse(request.host_url)
+        test_url = urlparse(url)
+    except ValueError:
+        return False
+    if unicodedata.category(url[0])[0] == "C":
+        return False
+    if test_url.scheme != ref_url.scheme or ref_url.netloc != test_url.netloc:
+        return False
+    return True

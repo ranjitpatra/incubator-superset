@@ -16,18 +16,15 @@
 #
 -r development.in
 -r integration.in
+-e file:.[bigquery,hive,presto,trino]
 docker
 flask-testing
 freezegun
-ipdb
-# pinning ipython as pip-compile-multi was bringing higher version
-# of the ipython that was not found in CI
-ipython==7.16.1
 openapi-spec-validator
-openpyxl
 parameterized
-pyhive[presto]>=0.6.3
+pyfakefs
 pylint
 pytest
 pytest-cov
+pytest-mock
 statsd

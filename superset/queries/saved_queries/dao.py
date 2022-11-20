@@ -41,7 +41,6 @@ class SavedQueryDAO(BaseDAO):
             )
             if commit:
                 db.session.commit()
-        except SQLAlchemyError:
-            if commit:
-                db.session.rollback()
-            raise DAODeleteFailedError()
+        except SQLAlchemyError as ex:
+            db.session.rollback()
+            raise DAODeleteFailedError() from ex

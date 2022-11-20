@@ -16,53 +16,40 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { CSSProperties, Children, ReactElement } from 'react';
+import React, { Children, ReactElement } from 'react';
 import { kebabCase } from 'lodash';
 import { mix } from 'polished';
 import cx from 'classnames';
-import { Button as AntdButton } from 'antd';
+import { AntdButton } from 'src/components';
 import { useTheme } from '@superset-ui/core';
-import { Tooltip } from 'src/common/components/Tooltip';
+import { Tooltip } from 'src/components/Tooltip';
+import { ButtonProps as AntdButtonProps } from 'antd/lib/button';
+import { TooltipProps } from 'antd/lib/tooltip';
 
 export type OnClickHandler = React.MouseEventHandler<HTMLElement>;
 
-export interface ButtonProps {
-  id?: string;
-  className?: string;
-  tooltip?: string;
-  ghost?: boolean;
-  placement?:
-    | 'bottom'
-    | 'left'
-    | 'right'
-    | 'top'
-    | 'topLeft'
-    | 'topRight'
-    | 'bottomLeft'
-    | 'bottomRight'
-    | 'leftTop'
-    | 'leftBottom'
-    | 'rightTop'
-    | 'rightBottom';
-  onClick?: OnClickHandler;
-  disabled?: boolean;
-  buttonStyle?:
-    | 'primary'
-    | 'secondary'
-    | 'tertiary'
-    | 'success'
-    | 'warning'
-    | 'danger'
-    | 'default'
-    | 'link'
-    | 'dashed';
-  buttonSize?: 'default' | 'small' | 'xsmall';
-  style?: CSSProperties;
-  children?: React.ReactNode;
-  href?: string;
-  htmlType?: 'button' | 'submit' | 'reset';
-  cta?: boolean;
-}
+export type ButtonStyle =
+  | 'primary'
+  | 'secondary'
+  | 'tertiary'
+  | 'success'
+  | 'warning'
+  | 'danger'
+  | 'default'
+  | 'link'
+  | 'dashed';
+
+export type ButtonSize = 'default' | 'small' | 'xsmall';
+
+export type ButtonProps = Omit<AntdButtonProps, 'css'> &
+  Pick<TooltipProps, 'placement'> & {
+    tooltip?: string;
+    className?: string;
+    buttonSize?: ButtonSize;
+    buttonStyle?: ButtonStyle;
+    cta?: boolean;
+    showMarginRight?: boolean;
+  };
 
 export default function Button(props: ButtonProps) {
   const {
@@ -75,6 +62,7 @@ export default function Button(props: ButtonProps) {
     cta,
     children,
     href,
+    showMarginRight = true,
     ...restProps
   } = props;
 
@@ -105,8 +93,8 @@ export default function Button(props: ButtonProps) {
   let borderColorDisabled = 'transparent';
 
   if (buttonStyle === 'primary') {
-    backgroundColor = primary.dark1;
-    backgroundColorHover = mix(0.1, grayscale.light5, primary.dark1);
+    backgroundColor = primary.base;
+    backgroundColorHover = primary.dark1;
     backgroundColorActive = mix(0.2, grayscale.dark2, primary.dark1);
     color = grayscale.light5;
     colorHover = color;
@@ -153,8 +141,8 @@ export default function Button(props: ButtonProps) {
   } else {
     renderedChildren = Children.toArray(children);
   }
-
-  const firstChildMargin = renderedChildren.length > 1 ? theme.gridUnit * 2 : 0;
+  const firstChildMargin =
+    showMarginRight && renderedChildren.length > 1 ? theme.gridUnit * 2 : 0;
 
   const button = (
     <AntdButton
@@ -197,14 +185,17 @@ export default function Button(props: ButtonProps) {
         },
         '&[disabled], &[disabled]:hover': {
           color: grayscale.base,
-          backgroundColor: backgroundColorDisabled,
-          borderColor: borderColorDisabled,
+          backgroundColor:
+            buttonStyle === 'link' ? 'transparent' : backgroundColorDisabled,
+          borderColor:
+            buttonStyle === 'link' ? 'transparent' : borderColorDisabled,
+          pointerEvents: 'none',
         },
         marginLeft: 0,
         '& + .superset-button': {
           marginLeft: theme.gridUnit * 2,
         },
-        '& :first-of-type': {
+        '& > :first-of-type': {
           marginRight: firstChildMargin,
         },
       }}
@@ -221,7 +212,22 @@ export default function Button(props: ButtonProps) {
         id={`${kebabCase(tooltip)}-tooltip`}
         title={tooltip}
       >
-        {button}
+        {/* wrap the button in a span so that the tooltip shows up
+        when the button is disabled. */}
+        {disabled ? (
+          <span
+            css={{
+              cursor: 'not-allowed',
+              '& > .superset-button': {
+                marginLeft: theme.gridUnit * 2,
+              },
+            }}
+          >
+            {button}
+          </span>
+        ) : (
+          button
+        )}
       </Tooltip>
     );
   }

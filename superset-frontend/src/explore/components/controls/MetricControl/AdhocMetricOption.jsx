@@ -18,12 +18,12 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import columnType from 'src/explore/propTypes/columnType';
-import { OptionControlLabel } from 'src/explore/components/OptionControls';
+import { OptionControlLabel } from 'src/explore/components/controls/OptionControls';
+import { DndItemType } from 'src/explore/components/DndItemType';
+import columnType from './columnType';
 import AdhocMetric from './AdhocMetric';
 import savedMetricType from './savedMetricType';
 import AdhocMetricPopoverTrigger from './AdhocMetricPopoverTrigger';
-import { DndItemType } from '../../DndItemType';
 
 const propTypes = {
   adhocMetric: PropTypes.instanceOf(AdhocMetric),
@@ -32,10 +32,13 @@ const propTypes = {
   columns: PropTypes.arrayOf(columnType),
   savedMetricsOptions: PropTypes.arrayOf(savedMetricType),
   savedMetric: savedMetricType,
-  datasourceType: PropTypes.string,
+  datasource: PropTypes.object,
   onMoveLabel: PropTypes.func,
   onDropLabel: PropTypes.func,
   index: PropTypes.number,
+  type: PropTypes.string,
+  multi: PropTypes.bool,
+  datasourceWarningMessage: PropTypes.string,
 };
 
 class AdhocMetricOption extends React.PureComponent {
@@ -46,7 +49,7 @@ class AdhocMetricOption extends React.PureComponent {
 
   onRemoveMetric(e) {
     e.stopPropagation();
-    this.props.onRemoveMetric();
+    this.props.onRemoveMetric(this.props.index);
   }
 
   render() {
@@ -56,10 +59,13 @@ class AdhocMetricOption extends React.PureComponent {
       columns,
       savedMetricsOptions,
       savedMetric,
-      datasourceType,
+      datasource,
       onMoveLabel,
       onDropLabel,
       index,
+      type,
+      multi,
+      datasourceWarningMessage,
     } = this.props;
 
     return (
@@ -69,7 +75,7 @@ class AdhocMetricOption extends React.PureComponent {
         columns={columns}
         savedMetricsOptions={savedMetricsOptions}
         savedMetric={savedMetric}
-        datasourceType={datasourceType}
+        datasource={datasource}
       >
         <OptionControlLabel
           savedMetric={savedMetric}
@@ -79,9 +85,11 @@ class AdhocMetricOption extends React.PureComponent {
           onMoveLabel={onMoveLabel}
           onDropLabel={onDropLabel}
           index={index}
-          type={DndItemType.AdhocMetricOption}
+          type={type ?? DndItemType.AdhocMetricOption}
           withCaret
           isFunction
+          multi={multi}
+          datasourceWarningMessage={datasourceWarningMessage}
         />
       </AdhocMetricPopoverTrigger>
     );

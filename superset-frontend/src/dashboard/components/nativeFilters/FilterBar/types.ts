@@ -16,17 +16,52 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { DataMask } from '@superset-ui/core';
-import { Filter } from '../types';
+import {
+  DataMask,
+  DataMaskStateWithId,
+  Divider,
+  Filter,
+} from '@superset-ui/core';
+import { FilterBarOrientation } from 'src/dashboard/types';
 
-export interface FilterProps {
-  filter: Filter;
-  icon?: React.ReactElement;
+interface CommonFiltersBarProps {
+  actions: React.ReactNode;
+  canEdit: boolean;
+  dataMaskSelected: DataMaskStateWithId;
   directPathToChild?: string[];
-  onFilterSelectionChange: (filter: Filter, dataMask: DataMask) => void;
+  filterValues: (Filter | Divider)[];
+  isInitialized: boolean;
+  onSelectionChange: (
+    filter: Pick<Filter, 'id'> & Partial<Filter>,
+    dataMask: Partial<DataMask>,
+  ) => void;
 }
 
-export interface CascadeFilter extends Filter {
-  cascadeChildren: CascadeFilter[];
+interface VerticalBarConfig {
+  filtersOpen: boolean;
+  height: number | string;
+  offset: number;
+  toggleFiltersBar: any;
+  width: number;
+}
+
+export interface FiltersBarProps
+  extends Pick<CommonFiltersBarProps, 'directPathToChild'> {
+  orientation: FilterBarOrientation;
+  verticalConfig?: VerticalBarConfig;
+}
+
+export type HorizontalBarProps = CommonFiltersBarProps & {
+  dashboardId: number;
+};
+
+export type VerticalBarProps = Omit<FiltersBarProps, 'orientation'> &
+  CommonFiltersBarProps &
+  VerticalBarConfig & {
+    isDisabled: boolean;
+  };
+
+export enum TabIds {
+  AllFilters = 'allFilters',
+  FilterSets = 'filterSets',
 }

@@ -21,17 +21,20 @@ from typing import Any, Dict, List
 import simplejson as json
 from flask import request, Response
 from flask_appbuilder import expose
+from flask_appbuilder.hooks import before_request
 from flask_appbuilder.security.decorators import has_access_api
 from jinja2.sandbox import SandboxedEnvironment
 from sqlalchemy import and_, func
+from werkzeug.exceptions import NotFound
 
-from superset import db, utils
+from superset import db, is_feature_enabled, utils
+from superset.connectors.sqla.models import SqlaTable
 from superset.jinja_context import ExtraCache
 from superset.models.dashboard import Dashboard
 from superset.models.slice import Slice
 from superset.models.sql_lab import SavedQuery
-from superset.models.tags import ObjectTypes, Tag, TaggedObject, TagTypes
-from superset.typing import FlaskResponse
+from superset.superset_typing import FlaskResponse
+from superset.tags.models import ObjectTypes, Tag, TaggedObject, TagTypes
 
 from .base import BaseSupersetView, json_success
 
@@ -47,6 +50,15 @@ def process_template(content: str) -> str:
 
 
 class TagView(BaseSupersetView):
+    @staticmethod
+    def is_enabled() -> bool:
+        return is_feature_enabled("TAGGING_SYSTEM")
+
+    @before_request
+    def ensure_enabled(self) -> None:
+        if not self.is_enabled():
+            raise NotFound()
+
     @has_access_api
     @expose("/tags/suggestions/", methods=["GET"])
     def suggestions(self) -> FlaskResponse:  # pylint: disable=no-self-use
@@ -225,6 +237,33 @@ class TagView(BaseSupersetView):
                     "creator": obj.creator(),
                 }
                 for obj in saved_queries
+            )
+
+        # datasets
+        if not types or "dataset" in types:
+            datasets = (
+                db.session.query(SqlaTable)
+                .join(
+                    TaggedObject,
+                    and_(
+                        TaggedObject.object_id == SqlaTable.id,
+                        TaggedObject.object_type == ObjectTypes.dataset,
+                    ),
+                )
+                .join(Tag, TaggedObject.tag_id == Tag.id)
+                .filter(Tag.name.in_(tags))
+            )
+            results.extend(
+                {
+                    "id": obj.id,
+                    "type": ObjectTypes.dataset.name,
+                    "name": obj.table_name,
+                    "url": obj.sql_url(),
+                    "changed_on": obj.changed_on,
+                    "created_by": obj.created_by_fk,
+                    "creator": obj.creator(),
+                }
+                for obj in datasets
             )
 
         return json_success(json.dumps(results, default=utils.core.json_int_dttm_ser))

@@ -24,9 +24,10 @@ metadata:
     chart: {{ template "superset.chart" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
+  namespace: {{ .Release.Namespace }}
 data:
 {{- range $path, $config := .Values.extraConfigs }}
   {{ $path }}: |
-{{ tpl $config . | indent 4 -}}
+{{- tpl $config $ | nindent 4 -}}
 {{- end -}}
 {{- end -}}

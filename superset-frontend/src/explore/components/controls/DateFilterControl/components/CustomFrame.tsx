@@ -17,12 +17,17 @@
  * under the License.
  */
 import React from 'react';
+import { useSelector } from 'react-redux';
 import { t } from '@superset-ui/core';
 import { Moment } from 'moment';
 import { isInteger } from 'lodash';
-import { Col, DatePicker, InputNumber, Row } from 'src/common/components';
-import { Radio } from 'src/common/components/Radio';
-import { Select } from 'src/components/Select';
+// @ts-ignore
+import { locales } from 'antd/dist/antd-with-locales';
+import { Col, Row } from 'src/components';
+import { InputNumber } from 'src/components/Input';
+import { DatePicker } from 'src/components/DatePicker';
+import { Radio } from 'src/components/Radio';
+import Select from 'src/components/Select/Select';
 import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 import {
   SINCE_GRAIN_OPTIONS,
@@ -34,12 +39,13 @@ import {
   customTimeRangeDecode,
   customTimeRangeEncode,
   dttmToMoment,
+  LOCALE_MAPPING,
 } from 'src/explore/components/controls/DateFilterControl/utils';
 import {
   CustomRangeKey,
-  SelectOptionType,
   FrameComponentProps,
 } from 'src/explore/components/controls/DateFilterControl/types';
+import { ExplorePageState } from 'src/explore/types';
 
 export function CustomFrame(props: FrameComponentProps) {
   const { customRange, matchedFlag } = customTimeRangeDecode(props.value);
@@ -104,6 +110,16 @@ export function CustomFrame(props: FrameComponentProps) {
     }
   }
 
+  // check if there is a locale defined for explore
+  const localFromFlaskBabel = useSelector(
+    (state: ExplorePageState) => state?.common?.locale,
+  );
+  // An undefined datePickerLocale is acceptable if no match is found in the LOCALE_MAPPING[localFromFlaskBabel] lookup
+  // and will fall back to antd's default locale when the antd DataPicker's prop locale === undefined
+  // This also protects us from the case where state is populated with a locale that antd locales does not recognize
+  const datePickerLocale =
+    locales[LOCALE_MAPPING[localFromFlaskBabel]]?.DatePicker;
+
   return (
     <div data-test="custom-frame">
       <div className="section-title">{t('Configure custom time range')}</div>
@@ -117,23 +133,21 @@ export function CustomFrame(props: FrameComponentProps) {
             />
           </div>
           <Select
+            ariaLabel={t('START (INCLUSIVE)')}
             options={SINCE_MODE_OPTIONS}
-            value={SINCE_MODE_OPTIONS.filter(
-              option => option.value === sinceMode,
-            )}
-            onChange={(option: SelectOptionType) =>
-              onChange('sinceMode', option.value)
-            }
+            value={sinceMode}
+            onChange={(value: string) => onChange('sinceMode', value)}
           />
           {sinceMode === 'specific' && (
             <Row>
               <DatePicker
                 showTime
-                value={dttmToMoment(sinceDatetime)}
-                onSelect={(datetime: Moment) =>
+                defaultValue={dttmToMoment(sinceDatetime)}
+                onChange={(datetime: Moment) =>
                   onChange('sinceDatetime', datetime.format(MOMENT_FORMAT))
                 }
                 allowClear={false}
+                locale={datePickerLocale}
               />
             </Row>
           )}
@@ -154,13 +168,10 @@ export function CustomFrame(props: FrameComponentProps) {
               </Col>
               <Col span={13}>
                 <Select
+                  ariaLabel={t('Relative period')}
                   options={SINCE_GRAIN_OPTIONS}
-                  value={SINCE_GRAIN_OPTIONS.filter(
-                    option => option.value === sinceGrain,
-                  )}
-                  onChange={(option: SelectOptionType) =>
-                    onChange('sinceGrain', option.value)
-                  }
+                  value={sinceGrain}
+                  onChange={(value: string) => onChange('sinceGrain', value)}
                 />
               </Col>
             </Row>
@@ -175,23 +186,21 @@ export function CustomFrame(props: FrameComponentProps) {
             />
           </div>
           <Select
+            ariaLabel={t('END (EXCLUSIVE)')}
             options={UNTIL_MODE_OPTIONS}
-            value={UNTIL_MODE_OPTIONS.filter(
-              option => option.value === untilMode,
-            )}
-            onChange={(option: SelectOptionType) =>
-              onChange('untilMode', option.value)
-            }
+            value={untilMode}
+            onChange={(value: string) => onChange('untilMode', value)}
           />
           {untilMode === 'specific' && (
             <Row>
               <DatePicker
                 showTime
-                value={dttmToMoment(untilDatetime)}
-                onSelect={(datetime: Moment) =>
+                defaultValue={dttmToMoment(untilDatetime)}
+                onChange={(datetime: Moment) =>
                   onChange('untilDatetime', datetime.format(MOMENT_FORMAT))
                 }
                 allowClear={false}
+                locale={datePickerLocale}
               />
             </Row>
           )}
@@ -211,13 +220,10 @@ export function CustomFrame(props: FrameComponentProps) {
               </Col>
               <Col span={13}>
                 <Select
+                  ariaLabel={t('Relative period')}
                   options={UNTIL_GRAIN_OPTIONS}
-                  value={UNTIL_GRAIN_OPTIONS.filter(
-                    option => option.value === untilGrain,
-                  )}
-                  onChange={(option: SelectOptionType) =>
-                    onChange('untilGrain', option.value)
-                  }
+                  value={untilGrain}
+                  onChange={(value: string) => onChange('untilGrain', value)}
                 />
               </Col>
             </Row>
@@ -246,12 +252,13 @@ export function CustomFrame(props: FrameComponentProps) {
               <Col>
                 <DatePicker
                   showTime
-                  value={dttmToMoment(anchorValue)}
-                  onSelect={(datetime: Moment) =>
+                  defaultValue={dttmToMoment(anchorValue)}
+                  onChange={(datetime: Moment) =>
                     onChange('anchorValue', datetime.format(MOMENT_FORMAT))
                   }
                   allowClear={false}
                   className="control-anchor-to-datetime"
+                  locale={datePickerLocale}
                 />
               </Col>
             )}

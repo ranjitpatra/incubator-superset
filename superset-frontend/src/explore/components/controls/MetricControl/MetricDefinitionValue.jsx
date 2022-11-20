@@ -18,16 +18,13 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import columnType from 'src/explore/propTypes/columnType';
-import { OptionControlLabel } from 'src/explore/components/OptionControls';
+import columnType from './columnType';
 import AdhocMetricOption from './AdhocMetricOption';
 import AdhocMetric from './AdhocMetric';
 import savedMetricType from './savedMetricType';
-import adhocMetricType from './adhocMetricType';
-import { DndItemType } from '../../DndItemType';
 
 const propTypes = {
-  option: PropTypes.oneOfType([savedMetricType, adhocMetricType]).isRequired,
+  option: PropTypes.oneOfType([PropTypes.object, PropTypes.string]).isRequired,
   index: PropTypes.number.isRequired,
   onMetricEdit: PropTypes.func,
   onRemoveMetric: PropTypes.func,
@@ -37,7 +34,8 @@ const propTypes = {
   savedMetrics: PropTypes.arrayOf(savedMetricType),
   savedMetricsOptions: PropTypes.arrayOf(savedMetricType),
   multi: PropTypes.bool,
-  datasourceType: PropTypes.string,
+  datasource: PropTypes.object,
+  datasourceWarningMessage: PropTypes.string,
 };
 
 export default function MetricDefinitionValue({
@@ -47,10 +45,13 @@ export default function MetricDefinitionValue({
   columns,
   savedMetrics,
   savedMetricsOptions,
-  datasourceType,
+  datasource,
   onMoveLabel,
   onDropLabel,
   index,
+  type,
+  multi,
+  datasourceWarningMessage,
 }) {
   const getSavedMetricByName = metricName =>
     savedMetrics.find(metric => metric.metric_name === metricName);
@@ -71,28 +72,18 @@ export default function MetricDefinitionValue({
       onRemoveMetric,
       columns,
       savedMetricsOptions,
-      datasourceType,
+      datasource,
       adhocMetric,
       onMoveLabel,
       onDropLabel,
       index,
       savedMetric: savedMetric ?? {},
+      type,
+      multi,
+      datasourceWarningMessage,
     };
 
     return <AdhocMetricOption {...metricOptionProps} />;
-  }
-  if (typeof option === 'string') {
-    return (
-      <OptionControlLabel
-        label={option}
-        onRemove={onRemoveMetric}
-        onMoveLabel={onMoveLabel}
-        onDropLabel={onDropLabel}
-        type={DndItemType.FilterOption}
-        index={index}
-        isFunction
-      />
-    );
   }
   return null;
 }

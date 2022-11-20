@@ -17,38 +17,38 @@
  * under the License.
  */
 import { SupersetClient, t, styled } from '@superset-ui/core';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import rison from 'rison';
+import { useSelector } from 'react-redux';
+import { useQueryParams, BooleanParam } from 'use-query-params';
+
+import Loading from 'src/components/Loading';
 import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
 import { useListViewResource } from 'src/views/CRUD/hooks';
-import { createErrorHandler } from 'src/views/CRUD/utils';
-import withToasts from 'src/messageToasts/enhancers/withToasts';
-import SubMenu, { SubMenuProps } from 'src/components/Menu/SubMenu';
+import { createErrorHandler, uploadUserPerms } from 'src/views/CRUD/utils';
+import withToasts from 'src/components/MessageToasts/withToasts';
+import SubMenu, { SubMenuProps } from 'src/views/components/SubMenu';
 import DeleteModal from 'src/components/DeleteModal';
-import { Tooltip } from 'src/common/components/Tooltip';
+import { getUrlParam } from 'src/utils/urlUtils';
+import { URL_PARAMS } from 'src/constants';
+import { Tooltip } from 'src/components/Tooltip';
 import Icons from 'src/components/Icons';
-import ListView, { Filters } from 'src/components/ListView';
-import { commonMenuData } from 'src/views/CRUD/data/common';
-import ImportModelsModal from 'src/components/ImportModal/index';
+import { isUserAdmin } from 'src/dashboard/util/permissionUtils';
+import ListView, { FilterOperator, Filters } from 'src/components/ListView';
+import handleResourceExport from 'src/utils/export';
+import { ExtentionConfigs } from 'src/views/components/types';
+import { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
+import type { MenuObjectProps } from 'src/views/components/Menu';
 import DatabaseModal from './DatabaseModal';
+
 import { DatabaseObject } from './types';
 
 const PAGE_SIZE = 25;
-const PASSWORDS_NEEDED_MESSAGE = t(
-  'The passwords for the databases below are needed in order to ' +
-    'import them. Please note that the "Secure Extra" and "Certificate" ' +
-    'sections of the database configuration are not present in export ' +
-    'files, and should be added manually after the import if they are needed.',
-);
-const CONFIRM_OVERWRITE_MESSAGE = t(
-  'You are importing one or more databases that already exist. ' +
-    'Overwriting might cause you to lose some of your work. Are you ' +
-    'sure you want to overwrite?',
-);
 
 interface DatabaseDeleteObject extends DatabaseObject {
   chart_count: number;
   dashboard_count: number;
+  sqllab_tab_count: number;
 }
 interface DatabaseListProps {
   addDangerToast: (msg: string) => void;
@@ -65,6 +65,11 @@ const IconCancelX = styled(Icons.CancelX)`
 
 const Actions = styled.div`
   color: ${({ theme }) => theme.colors.grayscale.base};
+
+  .action-button {
+    display: inline-block;
+    height: 100%;
+  }
 `;
 
 function BooleanDisplay({ value }: { value: Boolean }) {
@@ -86,29 +91,42 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
     t('database'),
     addDangerToast,
   );
-  const [databaseModalOpen, setDatabaseModalOpen] = useState<boolean>(false);
-  const [
-    databaseCurrentlyDeleting,
-    setDatabaseCurrentlyDeleting,
-  ] = useState<DatabaseDeleteObject | null>(null);
+  const user = useSelector<any, UserWithPermissionsAndRoles>(
+    state => state.user,
+  );
+  const showDatabaseModal = getUrlParam(URL_PARAMS.showDatabaseModal);
+
+  const [query, setQuery] = useQueryParams({
+    databaseAdded: BooleanParam,
+  });
+
+  const [databaseModalOpen, setDatabaseModalOpen] = useState<boolean>(
+    showDatabaseModal || false,
+  );
+  const [databaseCurrentlyDeleting, setDatabaseCurrentlyDeleting] =
+    useState<DatabaseDeleteObject | null>(null);
   const [currentDatabase, setCurrentDatabase] = useState<DatabaseObject | null>(
     null,
   );
-  const [importingDatabase, showImportModal] = useState<boolean>(false);
-  const [passwordFields, setPasswordFields] = useState<string[]>([]);
+  const [allowUploads, setAllowUploads] = useState<boolean>(false);
+  const isAdmin = isUserAdmin(user);
+  const showUploads = allowUploads || isAdmin;
 
-  const openDatabaseImportModal = () => {
-    showImportModal(true);
-  };
+  const [preparingExport, setPreparingExport] = useState<boolean>(false);
+  const { roles } = user;
+  const {
+    CSV_EXTENSIONS,
+    COLUMNAR_EXTENSIONS,
+    EXCEL_EXTENSIONS,
+    ALLOWED_EXTENSIONS,
+  } = useSelector<any, ExtentionConfigs>(state => state.common.conf);
 
-  const closeDatabaseImportModal = () => {
-    showImportModal(false);
-  };
-
-  const handleDatabaseImport = () => {
-    showImportModal(false);
-    refreshData();
-  };
+  useEffect(() => {
+    if (query?.databaseAdded) {
+      setQuery({ databaseAdded: undefined });
+      refreshData();
+    }
+  }, [query, setQuery, refreshData]);
 
   const openDatabaseDeleteModal = (database: DatabaseObject) =>
     SupersetClient.get({
@@ -119,6 +137,7 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
           ...database,
           chart_count: json.charts.count,
           dashboard_count: json.dashboards.count,
+          sqllab_tab_count: json.sqllab_tab_states.count,
         });
       })
       .catch(
@@ -147,21 +166,93 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
     );
   }
 
-  function handleDatabaseEdit(database: DatabaseObject) {
-    // Set database and open modal
+  function handleDatabaseEditModal({
+    database = null,
+    modalOpen = false,
+  }: { database?: DatabaseObject | null; modalOpen?: boolean } = {}) {
+    // Set database and modal
     setCurrentDatabase(database);
-    setDatabaseModalOpen(true);
+    setDatabaseModalOpen(modalOpen);
   }
 
   const canCreate = hasPerm('can_write');
   const canEdit = hasPerm('can_write');
   const canDelete = hasPerm('can_write');
   const canExport =
-    hasPerm('can_read') && isFeatureEnabled(FeatureFlag.VERSIONED_EXPORT);
+    hasPerm('can_export') && isFeatureEnabled(FeatureFlag.VERSIONED_EXPORT);
+
+  const { canUploadCSV, canUploadColumnar, canUploadExcel } = uploadUserPerms(
+    roles,
+    CSV_EXTENSIONS,
+    COLUMNAR_EXTENSIONS,
+    EXCEL_EXTENSIONS,
+    ALLOWED_EXTENSIONS,
+  );
+
+  const isDisabled = isAdmin && !allowUploads;
+
+  const uploadDropdownMenu = [
+    {
+      label: t('Upload file to database'),
+      childs: [
+        {
+          label: t('Upload CSV'),
+          name: 'Upload CSV file',
+          url: '/csvtodatabaseview/form',
+          perm: canUploadCSV && showUploads,
+          disable: isDisabled,
+        },
+        {
+          label: t('Upload columnar file'),
+          name: 'Upload columnar file',
+          url: '/columnartodatabaseview/form',
+          perm: canUploadColumnar && showUploads,
+          disable: isDisabled,
+        },
+        {
+          label: t('Upload Excel file'),
+          name: 'Upload Excel file',
+          url: '/exceltodatabaseview/form',
+          perm: canUploadExcel && showUploads,
+          disable: isDisabled,
+        },
+      ],
+    },
+  ];
+
+  const hasFileUploadEnabled = () => {
+    const payload = {
+      filters: [
+        { col: 'allow_file_upload', opr: 'upload_is_enabled', value: true },
+      ],
+    };
+    SupersetClient.get({
+      endpoint: `/api/v1/database/?q=${rison.encode(payload)}`,
+    }).then(({ json }: Record<string, any>) => {
+      // There might be some existings Gsheets and Clickhouse DBs
+      // with allow_file_upload set as True which is not possible from now on
+      const allowedDatabasesWithFileUpload =
+        json?.result?.filter(
+          (database: any) => database?.engine_information?.supports_file_upload,
+        ) || [];
+      setAllowUploads(allowedDatabasesWithFileUpload?.length >= 1);
+    });
+  };
+
+  useEffect(() => hasFileUploadEnabled(), [databaseModalOpen]);
+
+  const filteredDropDown = uploadDropdownMenu.reduce((prev, cur) => {
+    // eslint-disable-next-line no-param-reassign
+    cur.childs = cur.childs.filter(item => item.perm);
+    if (!cur.childs.length) return prev;
+    prev.push(cur);
+    return prev;
+  }, [] as MenuObjectProps[]);
 
   const menuData: SubMenuProps = {
     activeChild: 'Databases',
-    ...commonMenuData,
+    dropDownLinks: filteredDropDown,
+    name: t('Databases'),
   };
 
   if (canCreate) {
@@ -176,28 +267,25 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
         buttonStyle: 'primary',
         onClick: () => {
           // Ensure modal will be opened in add mode
-          setCurrentDatabase(null);
-          setDatabaseModalOpen(true);
+          handleDatabaseEditModal({ modalOpen: true });
         },
       },
     ];
-
-    if (isFeatureEnabled(FeatureFlag.VERSIONED_EXPORT)) {
-      menuData.buttons.push({
-        name: <Icons.Import />,
-        buttonStyle: 'link',
-        onClick: openDatabaseImportModal,
-      });
-    }
   }
 
   function handleDatabaseExport(database: DatabaseObject) {
-    return window.location.assign(
-      `/api/v1/database/export/?q=${rison.encode([database.id])}`,
-    );
+    if (database.id === undefined) {
+      return;
+    }
+
+    handleResourceExport('database', [database.id], () => {
+      setPreparingExport(false);
+    });
+    setPreparingExport(true);
   }
 
   const initialSort = [{ id: 'changed_on_delta_humanized', desc: true }];
+
   const columns = useMemo(
     () => [
       {
@@ -225,7 +313,9 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
           row: {
             original: { allow_run_async: allowRunAsync },
           },
-        }: any) => <BooleanDisplay value={allowRunAsync} />,
+        }: {
+          row: { original: { allow_run_async: boolean } };
+        }) => <BooleanDisplay value={allowRunAsync} />,
         size: 'sm',
       },
       {
@@ -247,13 +337,13 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
         size: 'sm',
       },
       {
-        accessor: 'allow_csv_upload',
+        accessor: 'allow_file_upload',
         Header: t('CSV upload'),
         Cell: ({
           row: {
-            original: { allow_csv_upload: allowCSVUpload },
+            original: { allow_file_upload: allowFileUpload },
           },
-        }: any) => <BooleanDisplay value={allowCSVUpload} />,
+        }: any) => <BooleanDisplay value={allowFileUpload} />,
         size: 'md',
       },
       {
@@ -290,7 +380,8 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
       },
       {
         Cell: ({ row: { original } }: any) => {
-          const handleEdit = () => handleDatabaseEdit(original);
+          const handleEdit = () =>
+            handleDatabaseEditModal({ database: original, modalOpen: true });
           const handleDelete = () => openDatabaseDeleteModal(original);
           const handleExport = () => handleDatabaseExport(original);
           if (!canEdit && !canDelete && !canExport) {
@@ -364,13 +455,14 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
     () => [
       {
         Header: t('Expose in SQL Lab'),
+        key: 'expose_in_sql_lab',
         id: 'expose_in_sqllab',
         input: 'select',
-        operator: 'eq',
-        unfilteredLabel: 'All',
+        operator: FilterOperator.equals,
+        unfilteredLabel: t('All'),
         selects: [
-          { label: 'Yes', value: true },
-          { label: 'No', value: false },
+          { label: t('Yes'), value: true },
+          { label: t('No'), value: false },
         ],
       },
       {
@@ -383,20 +475,22 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
             <span>{t('AQE')}</span>
           </Tooltip>
         ),
+        key: 'allow_run_async',
         id: 'allow_run_async',
         input: 'select',
-        operator: 'eq',
-        unfilteredLabel: 'All',
+        operator: FilterOperator.equals,
+        unfilteredLabel: t('All'),
         selects: [
-          { label: 'Yes', value: true },
-          { label: 'No', value: false },
+          { label: t('Yes'), value: true },
+          { label: t('No'), value: false },
         ],
       },
       {
         Header: t('Search'),
+        key: 'search',
         id: 'database_name',
         input: 'search',
-        operator: 'ct',
+        operator: FilterOperator.contains,
       },
     ],
     [],
@@ -406,9 +500,9 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
     <>
       <SubMenu {...menuData} />
       <DatabaseModal
-        database={currentDatabase}
+        databaseId={currentDatabase?.id}
         show={databaseModalOpen}
-        onHide={() => setDatabaseModalOpen(false)}
+        onHide={handleDatabaseEditModal}
         onDatabaseAdd={() => {
           refreshData();
         }}
@@ -416,10 +510,11 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
       {databaseCurrentlyDeleting && (
         <DeleteModal
           description={t(
-            'The database %s is linked to %s charts that appear on %s dashboards. Are you sure you want to continue? Deleting the database will break those objects.',
+            'The database %s is linked to %s charts that appear on %s dashboards and users have %s SQL Lab tabs using this database open. Are you sure you want to continue? Deleting the database will break those objects.',
             databaseCurrentlyDeleting.database_name,
             databaseCurrentlyDeleting.chart_count,
             databaseCurrentlyDeleting.dashboard_count,
+            databaseCurrentlyDeleting.sqllab_tab_count,
           )}
           onConfirm={() => {
             if (databaseCurrentlyDeleting) {
@@ -444,19 +539,7 @@ function DatabaseList({ addDangerToast, addSuccessToast }: DatabaseListProps) {
         pageSize={PAGE_SIZE}
       />
 
-      <ImportModelsModal
-        resourceName="database"
-        resourceLabel={t('database')}
-        passwordsNeededMessage={PASSWORDS_NEEDED_MESSAGE}
-        confirmOverwriteMessage={CONFIRM_OVERWRITE_MESSAGE}
-        addDangerToast={addDangerToast}
-        addSuccessToast={addSuccessToast}
-        onModelImport={handleDatabaseImport}
-        show={importingDatabase}
-        onHide={closeDatabaseImportModal}
-        passwordFields={passwordFields}
-        setPasswordFields={setPasswordFields}
-      />
+      {preparingExport && <Loading />}
     </>
   );
 }

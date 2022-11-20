@@ -18,7 +18,6 @@ import logging
 from typing import Any, Dict, List
 
 from flask_appbuilder.models.sqla import Model
-from flask_appbuilder.security.sqla.models import User
 from marshmallow import ValidationError
 
 from superset.annotation_layers.commands.exceptions import (
@@ -34,8 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class CreateAnnotationLayerCommand(BaseCommand):
-    def __init__(self, user: User, data: Dict[str, Any]):
-        self._actor = user
+    def __init__(self, data: Dict[str, Any]):
         self._properties = data.copy()
 
     def run(self) -> Model:
@@ -44,11 +42,11 @@ class CreateAnnotationLayerCommand(BaseCommand):
             annotation_layer = AnnotationLayerDAO.create(self._properties)
         except DAOCreateFailedError as ex:
             logger.exception(ex.exception)
-            raise AnnotationLayerCreateFailedError()
+            raise AnnotationLayerCreateFailedError() from ex
         return annotation_layer
 
     def validate(self) -> None:
-        exceptions: List[ValidationError] = list()
+        exceptions: List[ValidationError] = []
 
         name = self._properties.get("name", "")
 

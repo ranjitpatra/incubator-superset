@@ -18,17 +18,16 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import ReactMarkdown from 'react-markdown';
-import htmlParser from 'react-markdown/plugins/html-parser';
-
+import { connect } from 'react-redux';
 import cx from 'classnames';
-import { t } from '@superset-ui/core';
+
+import { t, SafeMarkdown } from '@superset-ui/core';
 import { Logger, LOG_ACTIONS_RENDER_CHART } from 'src/logger/LogUtils';
 import { MarkdownEditor } from 'src/components/AsyncAceEditor';
-import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
 
 import DeleteComponentButton from 'src/dashboard/components/DeleteComponentButton';
 import DragDroppable from 'src/dashboard/components/dnd/DragDroppable';
+import HoverMenu from 'src/dashboard/components/menu/HoverMenu';
 import ResizableContainer from 'src/dashboard/components/resizable/ResizableContainer';
 import MarkdownModeDropdown from 'src/dashboard/components/menu/MarkdownModeDropdown';
 import WithPopoverMenu from 'src/dashboard/components/menu/WithPopoverMenu';
@@ -66,27 +65,23 @@ const propTypes = {
   deleteComponent: PropTypes.func.isRequired,
   handleComponentDrop: PropTypes.func.isRequired,
   updateComponents: PropTypes.func.isRequired,
+
+  // HTML sanitization
+  htmlSanitization: PropTypes.bool,
+  htmlSchemaOverrides: PropTypes.object,
 };
 
 const defaultProps = {};
 
-const MARKDOWN_PLACE_HOLDER = `# ✨Markdown
-## ✨Markdown
-### ✨Markdown
+const MARKDOWN_PLACE_HOLDER = `# ✨Header 1
+## ✨Header 2
+### ✨Header 3
 
 <br />
 
-Click here to edit [markdown](https://bit.ly/1dQOfRK)`;
+Click here to learn more about [markdown formatting](https://bit.ly/1dQOfRK)`;
 
 const MARKDOWN_ERROR_MESSAGE = t('This markdown component has an error.');
-
-function isSafeMarkup(node) {
-  if (node.type === 'html') {
-    return /href="(javascript|vbscript|file):.*"/gim.test(node.value) === false;
-  }
-
-  return true;
-}
 
 class Markdown extends React.PureComponent {
   constructor(props) {
@@ -119,13 +114,8 @@ class Markdown extends React.PureComponent {
   }
 
   static getDerivedStateFromProps(nextProps, state) {
-    const {
-      hasError,
-      editorMode,
-      markdownSource,
-      undoLength,
-      redoLength,
-    } = state;
+    const { hasError, editorMode, markdownSource, undoLength, redoLength } =
+      state;
     const {
       component: nextComponent,
       undoLength: nextUndoLength,
@@ -257,7 +247,7 @@ class Markdown extends React.PureComponent {
         showGutter={false}
         editorProps={{ $blockScrolling: true }}
         value={
-          // thisl allows "select all => delete" to give an empty editor
+          // this allows "select all => delete" to give an empty editor
           typeof this.state.markdownSource === 'string'
             ? this.state.markdownSource
             : MARKDOWN_PLACE_HOLDER
@@ -271,21 +261,16 @@ class Markdown extends React.PureComponent {
 
   renderPreviewMode() {
     const { hasError } = this.state;
+
     return (
-      <ReactMarkdown
+      <SafeMarkdown
         source={
           hasError
             ? MARKDOWN_ERROR_MESSAGE
             : this.state.markdownSource || MARKDOWN_PLACE_HOLDER
         }
-        escapeHtml={isFeatureEnabled(FeatureFlag.ESCAPE_MARKDOWN_HTML)}
-        skipHtml={!isFeatureEnabled(FeatureFlag.DISPLAY_MARKDOWN_HTML)}
-        allowNode={isSafeMarkup}
-        astPlugins={[
-          htmlParser({
-            isValidNode: node => node.type !== 'script',
-          }),
-        ]}
+        htmlSanitization={this.props.htmlSanitization}
+        htmlSchemaOverrides={this.props.htmlSchemaOverrides}
       />
     );
   }
@@ -334,7 +319,6 @@ class Markdown extends React.PureComponent {
                 value={this.state.editorMode}
                 onChange={this.handleChangeEditorMode}
               />,
-              <DeleteComponentButton onDelete={this.handleDeleteComponent} />,
             ]}
             editMode={editMode}
           >
@@ -344,6 +328,7 @@ class Markdown extends React.PureComponent {
                 'dashboard-markdown',
                 isEditing && 'dashboard-markdown--editing',
               )}
+              id={component.id}
             >
               <ResizableContainer
                 id={component.id}
@@ -366,6 +351,13 @@ class Markdown extends React.PureComponent {
                   className="dashboard-component dashboard-component-chart-holder"
                   data-test="dashboard-component-chart-holder"
                 >
+                  {editMode && (
+                    <HoverMenu position="top">
+                      <DeleteComponentButton
+                        onDelete={this.handleDeleteComponent}
+                      />
+                    </HoverMenu>
+                  )}
                   {editMode && isEditing
                     ? this.renderEditMode()
                     : this.renderPreviewMode()}
@@ -383,4 +375,12 @@ class Markdown extends React.PureComponent {
 Markdown.propTypes = propTypes;
 Markdown.defaultProps = defaultProps;
 
-export default Markdown;
+function mapStateToProps(state) {
+  return {
+    undoLength: state.dashboardLayout.past.length,
+    redoLength: state.dashboardLayout.future.length,
+    htmlSanitization: state.common.conf.HTML_SANITIZATION,
+    htmlSchemaOverrides: state.common.conf.HTML_SANITIZATION_SCHEMA_EXTENSIONS,
+  };
+}
+export default connect(mapStateToProps)(Markdown);

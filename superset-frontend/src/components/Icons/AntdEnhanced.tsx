@@ -19,12 +19,15 @@
 
 import React from 'react';
 import * as AntdIcons from '@ant-design/icons/lib/icons';
-import Icon from './Icon';
+import { StyledIcon } from './Icon';
 import IconType from './IconType';
 
 const AntdEnhancedIcons = Object.keys(AntdIcons)
+  .filter(k => !k.includes('TwoTone'))
   .map(k => ({
-    [k]: (props: IconType) => <Icon component={AntdIcons[k]} {...props} />,
+    [k]: (props: IconType) => (
+      <StyledIcon component={AntdIcons[k]} {...props} />
+    ),
   }))
   .reduce((l, r) => ({ ...l, ...r }));
 

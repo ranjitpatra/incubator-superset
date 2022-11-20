@@ -17,8 +17,6 @@
 import logging
 from typing import List, Optional
 
-from flask_appbuilder.security.sqla.models import User
-
 from superset.annotation_layers.annotations.commands.exceptions import (
     AnnotationBulkDeleteFailedError,
     AnnotationNotFoundError,
@@ -32,8 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class BulkDeleteAnnotationCommand(BaseCommand):
-    def __init__(self, user: User, model_ids: List[int]):
-        self._actor = user
+    def __init__(self, model_ids: List[int]):
         self._model_ids = model_ids
         self._models: Optional[List[Annotation]] = None
 
@@ -44,7 +41,7 @@ class BulkDeleteAnnotationCommand(BaseCommand):
             return None
         except DAODeleteFailedError as ex:
             logger.exception(ex.exception)
-            raise AnnotationBulkDeleteFailedError()
+            raise AnnotationBulkDeleteFailedError() from ex
 
     def validate(self) -> None:
         # Validate/populate model exists

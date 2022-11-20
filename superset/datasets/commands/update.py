@@ -19,11 +19,10 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from flask_appbuilder.models.sqla import Model
-from flask_appbuilder.security.sqla.models import User
 from marshmallow import ValidationError
 
-from superset.commands.base import BaseCommand
-from superset.commands.utils import populate_owners
+from superset import security_manager
+from superset.commands.base import BaseCommand, UpdateMixin
 from superset.connectors.sqla.models import SqlaTable
 from superset.dao.exceptions import DAOUpdateFailedError
 from superset.datasets.commands.exceptions import (
@@ -42,24 +41,22 @@ from superset.datasets.commands.exceptions import (
 )
 from superset.datasets.dao import DatasetDAO
 from superset.exceptions import SupersetSecurityException
-from superset.views.base import check_ownership
 
 logger = logging.getLogger(__name__)
 
 
-class UpdateDatasetCommand(BaseCommand):
+class UpdateDatasetCommand(UpdateMixin, BaseCommand):
     def __init__(
         self,
-        user: User,
         model_id: int,
         data: Dict[str, Any],
-        override_columns: bool = False,
+        override_columns: Optional[bool] = False,
     ):
-        self._actor = user
         self._model_id = model_id
         self._properties = data.copy()
         self._model: Optional[SqlaTable] = None
         self.override_columns = override_columns
+        self._properties["override_columns"] = override_columns
 
     def run(self) -> Model:
         self.validate()
@@ -68,16 +65,15 @@ class UpdateDatasetCommand(BaseCommand):
                 dataset = DatasetDAO.update(
                     model=self._model,
                     properties=self._properties,
-                    override_columns=self.override_columns,
                 )
                 return dataset
             except DAOUpdateFailedError as ex:
                 logger.exception(ex.exception)
-                raise DatasetUpdateFailedError()
+                raise DatasetUpdateFailedError() from ex
         raise DatasetUpdateFailedError()
 
     def validate(self) -> None:
-        exceptions: List[ValidationError] = list()
+        exceptions: List[ValidationError] = []
         owner_ids: Optional[List[int]] = self._properties.get("owners")
         # Validate/populate model exists
         self._model = DatasetDAO.find_by_id(self._model_id)
@@ -85,9 +81,9 @@ class UpdateDatasetCommand(BaseCommand):
             raise DatasetNotFoundError()
         # Check ownership
         try:
-            check_ownership(self._model)
-        except SupersetSecurityException:
-            raise DatasetForbiddenError()
+            security_manager.raise_for_ownership(self._model)
+        except SupersetSecurityException as ex:
+            raise DatasetForbiddenError() from ex
 
         database_id = self._properties.get("database", None)
         table_name = self._properties.get("table_name", None)
@@ -101,7 +97,7 @@ class UpdateDatasetCommand(BaseCommand):
             exceptions.append(DatabaseChangeValidationError())
         # Validate/Populate owner
         try:
-            owners = populate_owners(self._actor, owner_ids)
+            owners = self.populate_owners(owner_ids)
             self._properties["owners"] = owners
         except ValidationError as ex:
             exceptions.append(ex)

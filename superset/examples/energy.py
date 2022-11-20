@@ -18,15 +18,21 @@
 import textwrap
 
 import pandas as pd
-from sqlalchemy import Float, String
+from sqlalchemy import Float, inspect, String
 from sqlalchemy.sql import column
 
+import superset.utils.database as database_utils
 from superset import db
 from superset.connectors.sqla.models import SqlMetric
 from superset.models.slice import Slice
-from superset.utils import core as utils
+from superset.utils.core import DatasourceType
 
-from .helpers import get_example_data, merge_slice, misc_dash_slices, TBL
+from .helpers import (
+    get_example_url,
+    get_table_connector_registry,
+    merge_slice,
+    misc_dash_slices,
+)
 
 
 def load_energy(
@@ -34,29 +40,35 @@ def load_energy(
 ) -> None:
     """Loads an energy related dataset to use with sankey and graphs"""
     tbl_name = "energy_usage"
-    database = utils.get_example_database()
-    table_exists = database.has_table_by_name(tbl_name)
+    database = database_utils.get_example_database()
 
-    if not only_metadata and (not table_exists or force):
-        data = get_example_data("energy.json.gz")
-        pdf = pd.read_json(data)
-        pdf = pdf.head(100) if sample else pdf
-        pdf.to_sql(
-            tbl_name,
-            database.get_sqla_engine(),
-            if_exists="replace",
-            chunksize=500,
-            dtype={"source": String(255), "target": String(255), "value": Float()},
-            index=False,
-            method="multi",
-        )
+    with database.get_sqla_engine_with_context() as engine:
+        schema = inspect(engine).default_schema_name
+        table_exists = database.has_table_by_name(tbl_name)
+
+        if not only_metadata and (not table_exists or force):
+            url = get_example_url("energy.json.gz")
+            pdf = pd.read_json(url, compression="gzip")
+            pdf = pdf.head(100) if sample else pdf
+            pdf.to_sql(
+                tbl_name,
+                engine,
+                schema=schema,
+                if_exists="replace",
+                chunksize=500,
+                dtype={"source": String(255), "target": String(255), "value": Float()},
+                index=False,
+                method="multi",
+            )
 
     print("Creating table [wb_health_population] reference")
-    tbl = db.session.query(TBL).filter_by(table_name=tbl_name).first()
+    table = get_table_connector_registry()
+    tbl = db.session.query(table).filter_by(table_name=tbl_name).first()
     if not tbl:
-        tbl = TBL(table_name=tbl_name)
+        tbl = table(table_name=tbl_name, schema=schema)
     tbl.description = "Energy consumption"
     tbl.database = database
+    tbl.filter_select_enabled = True
 
     if not any(col.metric_name == "sum__value" for col in tbl.metrics):
         col = str(column("value").compile(db.engine))
@@ -71,7 +83,7 @@ def load_energy(
     slc = Slice(
         slice_name="Energy Sankey",
         viz_type="sankey",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=textwrap.dedent(
             """\
@@ -95,7 +107,7 @@ def load_energy(
     slc = Slice(
         slice_name="Energy Force Layout",
         viz_type="graph_chart",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=textwrap.dedent(
             """\
@@ -119,7 +131,7 @@ def load_energy(
     slc = Slice(
         slice_name="Heatmap",
         viz_type="heatmap",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=textwrap.dedent(
             """\

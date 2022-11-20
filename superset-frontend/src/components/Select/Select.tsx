@@ -16,307 +16,306 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { SyntheticEvent, MutableRefObject, ComponentType } from 'react';
-import { merge } from 'lodash';
-import BasicSelect, {
-  OptionTypeBase,
-  MultiValueProps,
-  FormatOptionLabelMeta,
-  ValueType,
-  SelectComponentsConfig,
-  components as defaultComponents,
-  createFilter,
-} from 'react-select';
-import Async from 'react-select/async';
-import Creatable from 'react-select/creatable';
-import AsyncCreatable from 'react-select/async-creatable';
-import { withAsyncPaginate } from 'react-select-async-paginate';
-
-import { SelectComponents } from 'react-select/src/components';
+import React, {
+  forwardRef,
+  ReactElement,
+  RefObject,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+} from 'react';
+import { ensureIsArray, t } from '@superset-ui/core';
+import { LabeledValue as AntdLabeledValue } from 'antd/lib/select';
+import { isEqual } from 'lodash';
 import {
-  SortableContainer,
-  SortableElement,
-  SortableContainerProps,
-} from 'react-sortable-hoc';
-import arrayMove from 'array-move';
-import { Props as SelectProps } from 'react-select/src/Select';
-import { useTheme } from '@superset-ui/core';
+  getValue,
+  hasOption,
+  isLabeledValue,
+  renderSelectOptions,
+  hasCustomLabels,
+  sortSelectedFirstHelper,
+  sortComparatorWithSearchHelper,
+  handleFilterOptionHelper,
+  dropDownRenderHelper,
+  getSuffixIcon,
+} from './utils';
+import { SelectOptionsType, SelectProps } from './types';
 import {
-  WindowedSelectComponentType,
-  WindowedSelectProps,
-  WindowedSelect,
-  WindowedAsyncSelect,
-  WindowedCreatableSelect,
-  WindowedAsyncCreatableSelect,
-} from './WindowedSelect';
-import {
-  DEFAULT_CLASS_NAME,
-  DEFAULT_CLASS_NAME_PREFIX,
-  DEFAULT_STYLES,
-  DEFAULT_COMPONENTS,
-  VALUE_LABELED_STYLES,
-  PartialThemeConfig,
-  PartialStylesConfig,
-  SelectComponentsType,
-  InputProps,
-  defaultTheme,
+  StyledCheckOutlined,
+  StyledContainer,
+  StyledHeader,
+  StyledSelect,
+  StyledStopOutlined,
 } from './styles';
-import { findValue } from './utils';
+import {
+  EMPTY_OPTIONS,
+  MAX_TAG_COUNT,
+  TOKEN_SEPARATORS,
+  DEFAULT_SORT_COMPARATOR,
+} from './constants';
 
-type AnyReactSelect<OptionType extends OptionTypeBase> =
-  | BasicSelect<OptionType>
-  | Async<OptionType>
-  | Creatable<OptionType>
-  | AsyncCreatable<OptionType>;
-
-export type SupersetStyledSelectProps<
-  OptionType extends OptionTypeBase,
-  T extends WindowedSelectProps<OptionType> = WindowedSelectProps<OptionType>
-> = T & {
-  // additional props for easier usage or backward compatibility
-  labelKey?: string;
-  valueKey?: string;
-  assistiveText?: string;
-  multi?: boolean;
-  clearable?: boolean;
-  sortable?: boolean;
-  ignoreAccents?: boolean;
-  creatable?: boolean;
-  selectRef?:
-    | React.RefCallback<AnyReactSelect<OptionType>>
-    | MutableRefObject<AnyReactSelect<OptionType>>;
-  getInputValue?: (selectBalue: ValueType<OptionType>) => string | undefined;
-  optionRenderer?: (option: OptionType) => React.ReactNode;
-  valueRenderer?: (option: OptionType) => React.ReactNode;
-  valueRenderedAsLabel?: boolean;
-  // callback for paste event
-  onPaste?: (e: SyntheticEvent) => void;
-  forceOverflow?: boolean;
-  // for simplier theme overrides
-  themeConfig?: PartialThemeConfig;
-  stylesConfig?: PartialStylesConfig;
-};
-
-function styled<
-  OptionType extends OptionTypeBase,
-  SelectComponentType extends
-    | WindowedSelectComponentType<OptionType>
-    | ComponentType<
-        SelectProps<OptionType>
-      > = WindowedSelectComponentType<OptionType>
->(SelectComponent: SelectComponentType) {
-  type SelectProps = SupersetStyledSelectProps<OptionType>;
-  type Components = SelectComponents<OptionType>;
-
-  const SortableSelectComponent = SortableContainer(SelectComponent, {
-    withRef: true,
-  });
-
-  // default components for the given OptionType
-  const supersetDefaultComponents: SelectComponentsConfig<OptionType> = DEFAULT_COMPONENTS;
-
-  const getSortableMultiValue = (MultiValue: Components['MultiValue']) =>
-    SortableElement((props: MultiValueProps<OptionType>) => {
-      const onMouseDown = (e: SyntheticEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-      };
-      const innerProps = { onMouseDown };
-      return <MultiValue {...props} innerProps={innerProps} />;
-    });
-
-  /**
-   * Superset styled `Select` component. Apply Superset themed stylesheets and
-   * consolidate props API for backward compatibility with react-select v1.
-   */
-  function StyledSelect(selectProps: SelectProps) {
-    let stateManager: AnyReactSelect<OptionType>; // reference to react-select StateManager
-    const {
-      // additional props for Superset Select
-      selectRef,
-      labelKey = 'label',
-      valueKey = 'value',
-      themeConfig,
-      stylesConfig = {},
-      optionRenderer,
-      valueRenderer,
-      // whether value is rendered as `option-label` in input,
-      // useful for AdhocMetric and AdhocFilter
-      valueRenderedAsLabel: valueRenderedAsLabel_,
-      onPaste,
-      multi = false, // same as `isMulti`, used for backward compatibility
-      clearable, // same as `isClearable`
-      sortable = true, // whether to enable drag & drop sorting
-      forceOverflow, // whether the dropdown should be forcefully overflowing
-
-      // react-select props
-      className = DEFAULT_CLASS_NAME,
-      classNamePrefix = DEFAULT_CLASS_NAME_PREFIX,
+/**
+ * This component is a customized version of the Antdesign 4.X Select component
+ * https://ant.design/components/select/.
+ * The aim of the component was to combine all the instances of select components throughout the
+ * project under one and to remove the react-select component entirely.
+ * This Select component provides an API that is tested against all the different use cases of Superset.
+ * It limits and overrides the existing Antdesign API in order to keep their usage to the minimum
+ * and to enforce simplification and standardization.
+ * It is divided into two macro categories, Static and Async.
+ * The Static type accepts a static array of options.
+ * The Async type accepts a promise that will return the options.
+ * Each of the categories come with different abilities. For a comprehensive guide please refer to
+ * the storybook in src/components/Select/Select.stories.tsx.
+ */
+const Select = forwardRef(
+  (
+    {
+      allowClear,
+      allowNewOptions = false,
+      ariaLabel,
+      filterOption = true,
+      header = null,
+      headerPosition = 'top',
+      helperText,
+      invertSelection = false,
+      labelInValue = false,
+      loading,
+      mode = 'single',
+      name,
+      notFoundContent,
+      onChange,
+      onClear,
+      onDropdownVisibleChange,
+      optionFilterProps = ['label', 'value'],
       options,
-      value: value_,
-      components: components_,
-      isMulti: isMulti_,
-      isClearable: isClearable_,
-      minMenuHeight = 100, // apply different defaults
-      maxMenuHeight = 220,
-      filterOption,
-      ignoreAccents = false, // default is `true`, but it is slow
+      placeholder = t('Select ...'),
+      showSearch = true,
+      sortComparator = DEFAULT_SORT_COMPARATOR,
+      tokenSeparators,
+      value,
+      getPopupContainer,
+      ...props
+    }: SelectProps,
+    ref: RefObject<HTMLInputElement>,
+  ) => {
+    const isSingleMode = mode === 'single';
+    const shouldShowSearch = allowNewOptions ? true : showSearch;
+    const [selectValue, setSelectValue] = useState(value);
+    const [inputValue, setInputValue] = useState('');
+    const [isLoading, setIsLoading] = useState(loading);
+    const [isDropdownVisible, setIsDropdownVisible] = useState(false);
+    const mappedMode = isSingleMode
+      ? undefined
+      : allowNewOptions
+      ? 'tags'
+      : 'multiple';
 
-      getOptionValue = option =>
-        typeof option === 'string' ? option : option[valueKey],
+    const sortSelectedFirst = useCallback(
+      (a: AntdLabeledValue, b: AntdLabeledValue) =>
+        sortSelectedFirstHelper(a, b, selectValue),
+      [selectValue],
+    );
+    const sortComparatorWithSearch = useCallback(
+      (a: AntdLabeledValue, b: AntdLabeledValue) =>
+        sortComparatorWithSearchHelper(
+          a,
+          b,
+          inputValue,
+          sortSelectedFirst,
+          sortComparator,
+        ),
+      [inputValue, sortComparator, sortSelectedFirst],
+    );
 
-      getOptionLabel = option =>
-        typeof option === 'string'
-          ? option
-          : option[labelKey] || option[valueKey],
+    const initialOptions = useMemo(
+      () =>
+        options && Array.isArray(options) ? options.slice() : EMPTY_OPTIONS,
+      [options],
+    );
+    const initialOptionsSorted = useMemo(
+      () => initialOptions.slice().sort(sortSelectedFirst),
+      [initialOptions, sortSelectedFirst],
+    );
 
-      formatOptionLabel = (
-        option: OptionType,
-        { context }: FormatOptionLabelMeta<OptionType>,
-      ) => {
-        if (context === 'value') {
-          return valueRenderer ? valueRenderer(option) : getOptionLabel(option);
-        }
-        return optionRenderer ? optionRenderer(option) : getOptionLabel(option);
-      },
+    const [selectOptions, setSelectOptions] =
+      useState<SelectOptionsType>(initialOptionsSorted);
 
-      ...restProps
-    } = selectProps;
+    // add selected values to options list if they are not in it
+    const fullSelectOptions = useMemo(() => {
+      const missingValues: SelectOptionsType = ensureIsArray(selectValue)
+        .filter(opt => !hasOption(getValue(opt), selectOptions))
+        .map(opt =>
+          isLabeledValue(opt) ? opt : { value: opt, label: String(opt) },
+        );
+      return missingValues.length > 0
+        ? missingValues.concat(selectOptions)
+        : selectOptions;
+    }, [selectOptions, selectValue]);
 
-    // `value` may be rendered values (strings), we want option objects
-    const value: OptionType[] = findValue(value_, options || [], valueKey);
-
-    // Add backward compability to v1 API
-    const isMulti = isMulti_ === undefined ? multi : isMulti_;
-    const isClearable = isClearable_ === undefined ? clearable : isClearable_;
-
-    // Sort is only applied when there are multiple selected values
-    const shouldAllowSort =
-      isMulti && sortable && Array.isArray(value) && value.length > 1;
-
-    const MaybeSortableSelect = shouldAllowSort
-      ? SortableSelectComponent
-      : SelectComponent;
-    const components = { ...supersetDefaultComponents, ...components_ };
-
-    // Make multi-select sortable as per https://react-select.netlify.app/advanced
-    if (shouldAllowSort) {
-      components.MultiValue = getSortableMultiValue(
-        components.MultiValue || defaultComponents.MultiValue,
-      );
-
-      const sortableContainerProps: Partial<SortableContainerProps> = {
-        getHelperDimensions: ({ node }) => node.getBoundingClientRect(),
-        axis: 'xy',
-        onSortEnd: ({ oldIndex, newIndex }) => {
-          const newValue = arrayMove(value, oldIndex, newIndex);
-          if (restProps.onChange) {
-            restProps.onChange(newValue, { action: 'set-value' });
+    const handleOnSelect = (
+      selectedItem: string | number | AntdLabeledValue | undefined,
+    ) => {
+      if (isSingleMode) {
+        setSelectValue(selectedItem);
+      } else {
+        setSelectValue(previousState => {
+          const array = ensureIsArray(previousState);
+          const value = getValue(selectedItem);
+          // Tokenized values can contain duplicated values
+          if (!hasOption(value, array)) {
+            const result = [...array, selectedItem];
+            return isLabeledValue(selectedItem)
+              ? (result as AntdLabeledValue[])
+              : (result as (string | number)[]);
           }
-        },
-        distance: 4,
-      };
-      Object.assign(restProps, sortableContainerProps);
-    }
+          return previousState;
+        });
+      }
+      setInputValue('');
+    };
 
-    // When values are rendered as labels, adjust valueContainer padding
-    const valueRenderedAsLabel =
-      valueRenderedAsLabel_ === undefined ? isMulti : valueRenderedAsLabel_;
-    if (valueRenderedAsLabel && !stylesConfig.valueContainer) {
-      Object.assign(stylesConfig, VALUE_LABELED_STYLES);
-    }
+    const handleOnDeselect = (
+      value: string | number | AntdLabeledValue | undefined,
+    ) => {
+      if (Array.isArray(selectValue)) {
+        if (isLabeledValue(value)) {
+          const array = selectValue as AntdLabeledValue[];
+          setSelectValue(
+            array.filter(element => element.value !== value.value),
+          );
+        } else {
+          const array = selectValue as (string | number)[];
+          setSelectValue(array.filter(element => element !== value));
+        }
+      }
+      setInputValue('');
+    };
 
-    // Handle onPaste event
-    if (onPaste) {
-      const Input =
-        (components.Input as SelectComponentsType['Input']) ||
-        (defaultComponents.Input as SelectComponentsType['Input']);
-      components.Input = (props: InputProps) => (
-        <Input {...props} onPaste={onPaste} />
-      );
-    }
-    // for CreaTable
-    if (SelectComponent === WindowedCreatableSelect) {
-      restProps.getNewOptionData = (inputValue: string, label: string) => ({
-        label: label || inputValue,
-        [valueKey]: inputValue,
-        isNew: true,
-      });
-    }
+    const handleOnSearch = (search: string) => {
+      const searchValue = search.trim();
+      if (allowNewOptions && isSingleMode) {
+        const newOption = searchValue &&
+          !hasOption(searchValue, fullSelectOptions, true) && {
+            label: searchValue,
+            value: searchValue,
+            isNewOption: true,
+          };
+        const cleanSelectOptions = fullSelectOptions.filter(
+          opt => !opt.isNewOption || hasOption(opt.value, selectValue),
+        );
+        const newOptions = newOption
+          ? [newOption, ...cleanSelectOptions]
+          : cleanSelectOptions;
+        setSelectOptions(newOptions);
+      }
+      setInputValue(search);
+    };
 
-    // handle forcing dropdown overflow
-    // use only when setting overflow:visible isn't possible on the container element
-    if (forceOverflow) {
-      Object.assign(restProps, {
-        closeMenuOnScroll: (e: Event) => {
-          const target = e.target as HTMLElement;
-          return target && !target.classList?.contains('Select__menu-list');
-        },
-        menuPosition: 'fixed',
-      });
-    }
+    const handleFilterOption = (search: string, option: AntdLabeledValue) =>
+      handleFilterOptionHelper(search, option, optionFilterProps, filterOption);
 
-    // Make sure always return StateManager for the refs.
-    // To get the real `Select` component, keep tap into `obj.select`:
-    //   - for normal <Select /> component: StateManager -> Select,
-    //   - for <Creatable />: StateManager -> Creatable -> Select
-    const setRef = (instance: any) => {
-      stateManager =
-        shouldAllowSort && instance && 'refs' in instance
-          ? instance.refs.wrappedInstance // obtain StateManger from SortableContainer
-          : instance;
-      if (typeof selectRef === 'function') {
-        selectRef(stateManager);
-      } else if (selectRef && 'current' in selectRef) {
-        selectRef.current = stateManager;
+    const handleOnDropdownVisibleChange = (isDropdownVisible: boolean) => {
+      setIsDropdownVisible(isDropdownVisible);
+
+      // if no search input value, force sort options because it won't be sorted by
+      // `filterSort`.
+      if (isDropdownVisible && !inputValue && selectOptions.length > 1) {
+        if (!isEqual(initialOptionsSorted, selectOptions)) {
+          setSelectOptions(initialOptionsSorted);
+        }
+      }
+      if (onDropdownVisibleChange) {
+        onDropdownVisibleChange(isDropdownVisible);
       }
     };
 
-    const theme = useTheme();
+    const dropdownRender = (
+      originNode: ReactElement & { ref?: RefObject<HTMLElement> },
+    ) =>
+      dropDownRenderHelper(
+        originNode,
+        isDropdownVisible,
+        isLoading,
+        fullSelectOptions.length,
+        helperText,
+      );
+
+    const handleClear = () => {
+      setSelectValue(undefined);
+      if (onClear) {
+        onClear();
+      }
+    };
+
+    useEffect(() => {
+      // when `options` list is updated from component prop, reset states
+      setSelectOptions(initialOptions);
+    }, [initialOptions]);
+
+    useEffect(() => {
+      if (loading !== undefined && loading !== isLoading) {
+        setIsLoading(loading);
+      }
+    }, [isLoading, loading]);
+
+    useEffect(() => {
+      setSelectValue(value);
+    }, [value]);
 
     return (
-      <MaybeSortableSelect
-        ref={setRef}
-        className={className}
-        classNamePrefix={classNamePrefix}
-        isMulti={isMulti}
-        isClearable={isClearable}
-        options={options}
-        value={value}
-        minMenuHeight={minMenuHeight}
-        maxMenuHeight={maxMenuHeight}
-        filterOption={
-          // filterOption may be NULL
-          filterOption !== undefined
-            ? filterOption
-            : createFilter({ ignoreAccents })
-        }
-        styles={{ ...DEFAULT_STYLES, ...stylesConfig } as SelectProps['styles']}
-        // merge default theme from `react-select`, default theme for Superset,
-        // and the theme from props.
-        theme={reactSelectTheme =>
-          merge(reactSelectTheme, defaultTheme(theme), themeConfig)
-        }
-        formatOptionLabel={formatOptionLabel}
-        getOptionLabel={getOptionLabel}
-        getOptionValue={getOptionValue}
-        components={components}
-        {...restProps}
-      />
+      <StyledContainer headerPosition={headerPosition}>
+        {header && (
+          <StyledHeader headerPosition={headerPosition}>{header}</StyledHeader>
+        )}
+        <StyledSelect
+          allowClear={!isLoading && allowClear}
+          aria-label={ariaLabel || name}
+          dropdownRender={dropdownRender}
+          filterOption={handleFilterOption}
+          filterSort={sortComparatorWithSearch}
+          getPopupContainer={
+            getPopupContainer || (triggerNode => triggerNode.parentNode)
+          }
+          headerPosition={headerPosition}
+          labelInValue={labelInValue}
+          maxTagCount={MAX_TAG_COUNT}
+          mode={mappedMode}
+          notFoundContent={isLoading ? t('Loading...') : notFoundContent}
+          onDeselect={handleOnDeselect}
+          onDropdownVisibleChange={handleOnDropdownVisibleChange}
+          onPopupScroll={undefined}
+          onSearch={shouldShowSearch ? handleOnSearch : undefined}
+          onSelect={handleOnSelect}
+          onClear={handleClear}
+          onChange={onChange}
+          options={hasCustomLabels(options) ? undefined : fullSelectOptions}
+          placeholder={placeholder}
+          showSearch={shouldShowSearch}
+          showArrow
+          tokenSeparators={tokenSeparators || TOKEN_SEPARATORS}
+          value={selectValue}
+          suffixIcon={getSuffixIcon(
+            isLoading,
+            shouldShowSearch,
+            isDropdownVisible,
+          )}
+          menuItemSelectedIcon={
+            invertSelection ? (
+              <StyledStopOutlined iconSize="m" />
+            ) : (
+              <StyledCheckOutlined iconSize="m" />
+            )
+          }
+          {...props}
+          ref={ref}
+        >
+          {hasCustomLabels(options) && renderSelectOptions(fullSelectOptions)}
+        </StyledSelect>
+      </StyledContainer>
     );
-  }
-
-  // React.memo makes sure the component does no rerender given the same props
-  return React.memo(StyledSelect);
-}
-
-export const Select = styled(WindowedSelect);
-export const AsyncSelect = styled(WindowedAsyncSelect);
-export const CreatableSelect = styled(WindowedCreatableSelect);
-export const AsyncCreatableSelect = styled(WindowedAsyncCreatableSelect);
-export const PaginatedSelect = withAsyncPaginate(
-  styled<OptionTypeBase, ComponentType<SelectProps<OptionTypeBase>>>(
-    BasicSelect,
-  ),
+  },
 );
+
 export default Select;

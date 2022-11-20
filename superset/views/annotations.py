@@ -23,10 +23,9 @@ from flask_appbuilder.security.decorators import has_access
 from flask_babel import lazy_gettext as _
 from wtforms.validators import StopValidation
 
-from superset import is_feature_enabled
 from superset.constants import MODEL_VIEW_RW_METHOD_PERMISSION_MAP, RouteMethod
 from superset.models.annotations import Annotation, AnnotationLayer
-from superset.typing import FlaskResponse
+from superset.superset_typing import FlaskResponse
 from superset.views.base import SupersetModelView
 
 
@@ -48,9 +47,10 @@ class StartEndDttmValidator:  # pylint: disable=too-few-public-methods
             )
 
 
-class AnnotationModelView(
-    SupersetModelView, CompactCRUDMixin
-):  # pylint: disable=too-many-ancestors
+class AnnotationModelView(  # pylint: disable=too-many-ancestors
+    SupersetModelView,
+    CompactCRUDMixin,
+):
     datamodel = SQLAInterface(Annotation)
     include_route_methods = RouteMethod.CRUD_SET | {"annotation"}
 
@@ -102,13 +102,10 @@ class AnnotationModelView(
     @expose("/<pk>/annotation/", methods=["GET"])
     @has_access
     def annotation(self, pk: int) -> FlaskResponse:  # pylint: disable=unused-argument
-        if not is_feature_enabled("ENABLE_REACT_CRUD_VIEWS"):
-            return super().list()
-
         return super().render_app_template()
 
 
-class AnnotationLayerModelView(SupersetModelView):  # pylint: disable=too-many-ancestors
+class AnnotationLayerModelView(SupersetModelView):
     datamodel = SQLAInterface(AnnotationLayer)
     include_route_methods = RouteMethod.CRUD_SET | {RouteMethod.API_READ}
     related_views = [AnnotationModelView]
@@ -130,7 +127,4 @@ class AnnotationLayerModelView(SupersetModelView):  # pylint: disable=too-many-a
     @expose("/list/")
     @has_access
     def list(self) -> FlaskResponse:
-        if not is_feature_enabled("ENABLE_REACT_CRUD_VIEWS"):
-            return super().list()
-
         return super().render_app_template()

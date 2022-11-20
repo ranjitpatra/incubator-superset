@@ -39,10 +39,9 @@ class AnnotationDAO(BaseDAO):
             )
             if commit:
                 db.session.commit()
-        except SQLAlchemyError:
-            if commit:
-                db.session.rollback()
-            raise DAODeleteFailedError()
+        except SQLAlchemyError as ex:
+            db.session.rollback()
+            raise DAODeleteFailedError() from ex
 
     @staticmethod
     def validate_update_uniqueness(

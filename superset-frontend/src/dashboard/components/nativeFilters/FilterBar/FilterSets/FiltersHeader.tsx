@@ -17,12 +17,20 @@
  * under the License.
  */
 import React, { FC } from 'react';
-import { styled, t } from '@superset-ui/core';
-import { Collapse, Typography } from 'src/common/components';
-import { DataMaskUnit } from 'src/dataMask/types';
-import { CaretDownOutlined } from '@ant-design/icons';
+import {
+  DataMaskState,
+  FilterSet,
+  isNativeFilter,
+  styled,
+  t,
+  useTheme,
+} from '@superset-ui/core';
+import { Typography, AntdTooltip, AntdCollapse } from 'src/components';
+import Icons from 'src/components/Icons';
+import { areObjectsEqual } from 'src/reduxUtils';
 import { getFilterValueForDisplay } from './utils';
-import { Filter } from '../../types';
+import { useFilters } from '../state';
+import { getFilterBarTestId } from '../utils';
 
 const FilterHeader = styled.div`
   display: flex;
@@ -30,7 +38,7 @@ const FilterHeader = styled.div`
   font-size: ${({ theme }) => theme.typography.sizes.s}px;
 `;
 
-const StyledCollapse = styled(Collapse)`
+const StyledCollapse = styled(AntdCollapse)`
   &.ant-collapse-ghost > .ant-collapse-item {
     & > .ant-collapse-content > .ant-collapse-content-box {
       padding: 0;
@@ -52,47 +60,95 @@ const StyledCollapse = styled(Collapse)`
   }
 `;
 
-type FiltersHeaderProps = {
-  filters: Filter[];
-  dataMask?: DataMaskUnit;
-  expanded: boolean;
+const StyledFilterRow = styled.div`
+  padding-top: ${({ theme }) => theme.gridUnit}px;
+  padding-bottom: ${({ theme }) => theme.gridUnit}px;
+`;
+
+export type FiltersHeaderProps = {
+  dataMask?: DataMaskState;
+  filterSet?: FilterSet;
 };
 
-const FiltersHeader: FC<FiltersHeaderProps> = ({
-  filters,
-  dataMask,
-  expanded,
-}) => {
+const FiltersHeader: FC<FiltersHeaderProps> = ({ dataMask, filterSet }) => {
+  const theme = useTheme();
+  const filters = useFilters();
+  const filterValues = Object.values(filters).filter(isNativeFilter);
+
+  let resultFilters = filterValues ?? [];
+  if (filterSet?.nativeFilters) {
+    resultFilters = Object.values(filterSet?.nativeFilters).filter(
+      isNativeFilter,
+    );
+  }
+
   const getFiltersHeader = () => (
     <FilterHeader>
       <Typography.Text type="secondary">
-        {t('Filters (%d)', filters.length)}
+        {t('Filters (%d)', resultFilters.length)}
       </Typography.Text>
     </FilterHeader>
   );
+
+  const getFilterRow = ({ id, name }: { id: string; name: string }) => {
+    const changedFilter =
+      filterSet &&
+      !areObjectsEqual(
+        filters[id]?.controlValues,
+        filterSet?.nativeFilters?.[id]?.controlValues,
+        {
+          ignoreUndefined: true,
+        },
+      );
+    const removedFilter = !Object.keys(filters).includes(id);
+
+    return (
+      <AntdTooltip
+        title={
+          (removedFilter &&
+            t(
+              "This filter doesn't exist in dashboard. It will not be applied.",
+            )) ||
+          (changedFilter &&
+            t('Filter metadata changed in dashboard. It will not be applied.'))
+        }
+        placement="bottomLeft"
+        key={id}
+      >
+        <StyledFilterRow data-test="filter-info">
+          <Typography.Text strong delete={removedFilter} mark={changedFilter}>
+            {name}:&nbsp;
+          </Typography.Text>
+          <Typography.Text delete={removedFilter} mark={changedFilter}>
+            {getFilterValueForDisplay(dataMask?.[id]?.filterState?.value) || (
+              <Typography.Text type="secondary">{t('None')}</Typography.Text>
+            )}
+          </Typography.Text>
+        </StyledFilterRow>
+      </AntdTooltip>
+    );
+  };
+
+  const getExpandIcon = ({ isActive }: { isActive: boolean }) => {
+    const color = theme.colors.grayscale.base;
+    const Icon = isActive ? Icons.CaretUpOutlined : Icons.CaretDownOutlined;
+    return <Icon iconColor={color} />;
+  };
+
   return (
     <StyledCollapse
       ghost
       expandIconPosition="right"
-      defaultActiveKey={expanded ? ['filters'] : undefined}
-      expandIcon={({ isActive }: { isActive: boolean }) => (
-        <CaretDownOutlined rotate={isActive ? 0 : 180} />
-      )}
+      defaultActiveKey={!filterSet ? ['filters'] : undefined}
+      expandIcon={getExpandIcon}
     >
-      <Collapse.Panel header={getFiltersHeader()} key="filters">
-        {filters.map(({ id, name }) => (
-          <div>
-            <Typography.Text strong>{name}:&nbsp;</Typography.Text>
-            <Typography.Text>
-              {getFilterValueForDisplay(
-                dataMask?.[id]?.currentState?.value,
-              ) || (
-                <Typography.Text type="secondary">{t('None')}</Typography.Text>
-              )}
-            </Typography.Text>
-          </div>
-        ))}
-      </Collapse.Panel>
+      <AntdCollapse.Panel
+        {...getFilterBarTestId('collapse-filter-set-description')}
+        header={getFiltersHeader()}
+        key="filters"
+      >
+        {resultFilters.map(getFilterRow)}
+      </AntdCollapse.Panel>
     </StyledCollapse>
   );
 };

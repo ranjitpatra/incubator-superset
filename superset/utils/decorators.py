@@ -14,18 +14,43 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import time
-from functools import wraps
-from typing import Any, Callable, Dict, Iterator, Union
+from __future__ import annotations
 
-from contextlib2 import contextmanager
+import time
+from contextlib import contextmanager
+from functools import wraps
+from typing import Any, Callable, Dict, Iterator, Optional, TYPE_CHECKING, Union
+
 from flask import current_app, Response
 
 from superset import is_feature_enabled
 from superset.dashboards.commands.exceptions import DashboardAccessDeniedError
-from superset.stats_logger import BaseStatsLogger
 from superset.utils import core as utils
 from superset.utils.dates import now_as_float
+
+if TYPE_CHECKING:
+    from superset.stats_logger import BaseStatsLogger
+
+
+def statsd_gauge(metric_prefix: Optional[str] = None) -> Callable[..., Any]:
+    def decorate(f: Callable[..., Any]) -> Callable[..., Any]:
+        """
+        Handle sending statsd gauge metric from any method or function
+        """
+
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            metric_prefix_ = metric_prefix or f.__name__
+            try:
+                result = f(*args, **kwargs)
+                current_app.config["STATS_LOGGER"].gauge(f"{metric_prefix_}.ok", 1)
+                return result
+            except Exception as ex:
+                current_app.config["STATS_LOGGER"].gauge(f"{metric_prefix_}.error", 1)
+                raise ex
+
+        return wrapped
+
+    return decorate
 
 
 @contextmanager
@@ -40,7 +65,7 @@ def stats_timing(stats_key: str, stats_logger: BaseStatsLogger) -> Iterator[floa
         stats_logger.timing(stats_key, now_as_float() - start_ts)
 
 
-def arghash(args: Any, kwargs: Dict[str, Any]) -> int:
+def arghash(args: Any, kwargs: Any) -> int:
     """Simple argument hash with kwargs sorted."""
     sorted_args = tuple(
         x if hasattr(x, "__repr__") else x for x in [*args, *sorted(kwargs.items())]
@@ -87,6 +112,7 @@ def check_dashboard_access(
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
         def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            # pylint: disable=import-outside-toplevel
             from superset.models.dashboard import Dashboard
 
             dashboard = Dashboard.get(str(kwargs["dashboard_id_or_slug"]))

@@ -17,80 +17,135 @@
  * under the License.
  */
 
-import React, { FC } from 'react';
-import { t, styled } from '@superset-ui/core';
-import { Radio } from 'src/common/components/Radio';
-import { Form, Typography, Space, FormInstance } from 'src/common/components';
-import { NativeFiltersForm } from '../../types';
-import { Filter } from '../../../types';
-import { Scoping } from './types';
+import React, { FC, useCallback, useState } from 'react';
+import { NativeFilterScope, styled, t } from '@superset-ui/core';
+import { Radio } from 'src/components/Radio';
+import { AntdForm, Typography } from 'src/components';
+import { useComponentDidUpdate } from 'src/hooks/useComponentDidUpdate/useComponentDidUpdate';
+import { ScopingType } from './types';
 import ScopingTree from './ScopingTree';
-import { setFilterFieldValues, useForceUpdate } from '../utils';
 import { getDefaultScopeValue, isScopingAll } from './utils';
 
 type FilterScopeProps = {
-  filterId: string;
-  filterToEdit?: Filter;
-  form: FormInstance<NativeFiltersForm>;
+  pathToFormValue?: string[];
+  updateFormValues: (values: any) => void;
+  formFilterScope?: NativeFilterScope;
+  forceUpdate: Function;
+  filterScope?: NativeFilterScope;
+  formScopingType?: ScopingType;
+  chartId?: number;
+  initiallyExcludedCharts?: number[];
 };
 
-const CleanFormItem = styled(Form.Item)`
+const Wrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  & > * {
+    margin-bottom: ${({ theme }) => theme.gridUnit}px;
+  }
+  padding: 0px ${({ theme }) => theme.gridUnit * 4}px;
+`;
+
+const CleanFormItem = styled(AntdForm.Item)`
   margin-bottom: 0;
 `;
 
 const FilterScope: FC<FilterScopeProps> = ({
-  filterId,
-  filterToEdit,
-  form,
+  pathToFormValue = [],
+  formScopingType,
+  formFilterScope,
+  forceUpdate,
+  filterScope,
+  updateFormValues,
+  chartId,
+  initiallyExcludedCharts,
 }) => {
-  const formFilter = form.getFieldValue('filters')?.[filterId];
-  const initialScope = filterToEdit?.scope || getDefaultScopeValue();
+  const [initialFilterScope] = useState(
+    filterScope || getDefaultScopeValue(chartId, initiallyExcludedCharts),
+  );
+  const [initialScopingType] = useState(
+    isScopingAll(initialFilterScope, chartId)
+      ? ScopingType.all
+      : ScopingType.specific,
+  );
+  const [hasScopeBeenModified, setHasScopeBeenModified] = useState(
+    !!filterScope,
+  );
 
-  const scoping = isScopingAll(initialScope) ? Scoping.all : Scoping.specific;
+  const onUpdateFormValues = useCallback(
+    (formValues: any) => {
+      updateFormValues(formValues);
+      setHasScopeBeenModified(true);
+    },
+    [updateFormValues],
+  );
 
-  const forceUpdate = useForceUpdate();
+  const updateScopes = useCallback(() => {
+    if (filterScope || hasScopeBeenModified) {
+      return;
+    }
+
+    const newScope = getDefaultScopeValue(chartId, initiallyExcludedCharts);
+    updateFormValues({
+      scope: newScope,
+      scoping: isScopingAll(newScope, chartId)
+        ? ScopingType.all
+        : ScopingType.specific,
+    });
+  }, [
+    chartId,
+    filterScope,
+    hasScopeBeenModified,
+    initiallyExcludedCharts,
+    updateFormValues,
+  ]);
+  useComponentDidUpdate(updateScopes);
 
   return (
-    <Space direction="vertical">
+    <Wrapper>
       <CleanFormItem
-        name={['filters', filterId, 'scope']}
-        hidden
-        initialValue={initialScope}
-      />
-      <Typography.Title level={5}>{t('Scoping')}</Typography.Title>
-      <CleanFormItem
-        name={['filters', filterId, 'scoping']}
-        initialValue={scoping}
+        name={[...pathToFormValue, 'scoping']}
+        initialValue={initialScopingType}
       >
         <Radio.Group
           onChange={({ target: { value } }) => {
-            if (value === Scoping.all) {
-              setFilterFieldValues(form, filterId, {
-                scope: getDefaultScopeValue(),
+            if (value === ScopingType.all) {
+              const scope = getDefaultScopeValue(chartId);
+              updateFormValues({
+                scope,
               });
             }
+            setHasScopeBeenModified(true);
             forceUpdate();
           }}
         >
-          <Radio value={Scoping.all}>{t('Apply to all panels')}</Radio>
-          <Radio value={Scoping.specific}>
+          <Radio value={ScopingType.all}>{t('Apply to all panels')}</Radio>
+          <Radio value={ScopingType.specific}>
             {t('Apply to specific panels')}
           </Radio>
         </Radio.Group>
       </CleanFormItem>
       <Typography.Text type="secondary">
-        {formFilter?.scoping === Scoping.specific
+        {(formScopingType ?? initialScopingType) === ScopingType.specific
           ? t('Only selected panels will be affected by this filter')
           : t('All panels with this column will be affected by this filter')}
       </Typography.Text>
-      {formFilter?.scoping === Scoping.specific && (
+      {(formScopingType ?? initialScopingType) === ScopingType.specific && (
         <ScopingTree
-          initialScope={initialScope}
-          form={form}
-          filterId={filterId}
+          updateFormValues={onUpdateFormValues}
+          initialScope={initialFilterScope}
+          formScope={formFilterScope}
+          forceUpdate={forceUpdate}
+          chartId={chartId}
+          initiallyExcludedCharts={initiallyExcludedCharts}
         />
       )}
-    </Space>
+      <CleanFormItem
+        name={[...pathToFormValue, 'scope']}
+        hidden
+        initialValue={initialFilterScope}
+      />
+    </Wrapper>
   );
 };
 

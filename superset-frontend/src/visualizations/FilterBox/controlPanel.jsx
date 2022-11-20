@@ -51,6 +51,8 @@ export default {
               description: t('Whether to include a time filter'),
             },
           },
+        ],
+        [
           {
             name: 'instant_filtering',
             config: {
@@ -69,38 +71,20 @@ export default {
             name: 'show_sqla_time_granularity',
             config: {
               type: 'CheckboxControl',
-              label: t('Show SQL granularity dropdown'),
+              label: t('Show time grain dropdown'),
               default: false,
-              description: t('Check to include SQL granularity dropdown'),
-            },
-          },
-          {
-            name: 'show_sqla_time_column',
-            config: {
-              type: 'CheckboxControl',
-              label: t('Show SQL time column'),
-              default: false,
-              description: t('Check to include time column dropdown'),
+              description: t('Check to include time grain dropdown'),
             },
           },
         ],
         [
           {
-            name: 'show_druid_time_granularity',
+            name: 'show_sqla_time_column',
             config: {
               type: 'CheckboxControl',
-              label: t('Show Druid granularity dropdown'),
+              label: t('Show time column'),
               default: false,
-              description: t('Check to include Druid granularity dropdown'),
-            },
-          },
-          {
-            name: 'show_druid_time_origin',
-            config: {
-              type: 'CheckboxControl',
-              label: t('Show Druid time origin'),
-              default: false,
-              description: t('Check to include time origin dropdown'),
+              description: t('Check to include time column dropdown'),
             },
           },
         ],

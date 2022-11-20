@@ -24,11 +24,14 @@ import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useListViewResource } from 'src/views/CRUD/hooks';
 import { createFetchRelated, createErrorHandler } from 'src/views/CRUD/utils';
-import withToasts from 'src/messageToasts/enhancers/withToasts';
-import SubMenu, { SubMenuProps } from 'src/components/Menu/SubMenu';
+import withToasts from 'src/components/MessageToasts/withToasts';
+import SubMenu, { SubMenuProps } from 'src/views/components/SubMenu';
 import ActionsBar, { ActionProps } from 'src/components/ListView/ActionsBar';
-import ListView, { ListViewProps, Filters } from 'src/components/ListView';
-import Button from 'src/components/Button';
+import ListView, {
+  ListViewProps,
+  Filters,
+  FilterOperator,
+} from 'src/components/ListView';
 import DeleteModal from 'src/components/DeleteModal';
 import ConfirmStatusChange from 'src/components/ConfirmStatusChange';
 import AnnotationLayerModal from './AnnotationLayerModal';
@@ -42,6 +45,8 @@ interface AnnotationLayersListProps {
   addSuccessToast: (msg: string) => void;
   user: {
     userId: string | number;
+    firstName: string;
+    lastName: string;
   };
 }
 
@@ -67,19 +72,13 @@ function AnnotationLayersList({
     addDangerToast,
   );
 
-  const [
-    annotationLayerModalOpen,
-    setAnnotationLayerModalOpen,
-  ] = useState<boolean>(false);
-  const [
-    currentAnnotationLayer,
-    setCurrentAnnotationLayer,
-  ] = useState<AnnotationLayerObject | null>(null);
+  const [annotationLayerModalOpen, setAnnotationLayerModalOpen] =
+    useState<boolean>(false);
+  const [currentAnnotationLayer, setCurrentAnnotationLayer] =
+    useState<AnnotationLayerObject | null>(null);
 
-  const [
-    layerCurrentlyDeleting,
-    setLayerCurrentlyDeleting,
-  ] = useState<AnnotationLayerObject | null>(null);
+  const [layerCurrentlyDeleting, setLayerCurrentlyDeleting] =
+    useState<AnnotationLayerObject | null>(null);
 
   const handleLayerDelete = ({ id, name }: AnnotationLayerObject) => {
     SupersetClient.delete({
@@ -284,9 +283,10 @@ function AnnotationLayersList({
     () => [
       {
         Header: t('Created by'),
+        key: 'created_by',
         id: 'created_by',
         input: 'select',
-        operator: 'rel_o_m',
+        operator: FilterOperator.relationOneMany,
         unfilteredLabel: 'All',
         fetchSelects: createFetchRelated(
           'annotation_layer',
@@ -297,36 +297,30 @@ function AnnotationLayersList({
               errMsg,
             ),
           ),
-          user.userId,
+          user,
         ),
         paginate: true,
       },
       {
         Header: t('Search'),
+        key: 'search',
         id: 'name',
         input: 'search',
-        operator: 'ct',
+        operator: FilterOperator.contains,
       },
     ],
     [],
   );
 
-  const EmptyStateButton = (
-    <Button
-      buttonStyle="primary"
-      onClick={() => {
-        handleAnnotationLayerEdit(null);
-      }}
-    >
+  const emptyState = {
+    title: t('No annotation layers yet'),
+    image: 'filter-results.svg',
+    buttonAction: () => handleAnnotationLayerEdit(null),
+    buttonText: (
       <>
         <i className="fa fa-plus" /> {t('Annotation layer')}
       </>
-    </Button>
-  );
-
-  const emptyState = {
-    message: t('No annotation layers yet'),
-    slot: EmptyStateButton,
+    ),
   };
 
   const onLayerAdd = (id?: number) => {

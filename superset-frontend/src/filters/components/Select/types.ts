@@ -17,40 +17,58 @@
  * under the License.
  */
 import {
-  QueryFormData,
-  DataRecord,
-  SetDataMaskHook,
+  AppSection,
   Behavior,
+  ChartProps,
+  DataRecord,
+  FilterState,
+  GenericDataType,
+  QueryFormData,
+  ChartDataResponseResult,
 } from '@superset-ui/core';
 import { RefObject } from 'react';
-import { PluginFilterStylesProps } from '../types';
+import { PluginFilterHooks, PluginFilterStylesProps } from '../types';
 
-interface PluginFilterSelectCustomizeProps {
-  defaultValue?: (string | number)[] | null;
-  currentValue?: (string | number)[] | null;
+export type SelectValue = (number | string | null)[] | null | undefined;
+
+export interface PluginFilterSelectCustomizeProps {
+  defaultValue?: SelectValue;
   enableEmptyFilter: boolean;
-  fetchPredicate?: string;
   inverseSelection: boolean;
   multiSelect: boolean;
-  inputRef?: RefObject<HTMLInputElement>;
+  defaultToFirstItem: boolean;
+  searchAllOptions: boolean;
+  sortAscending?: boolean;
+  sortMetric?: string;
 }
 
 export type PluginFilterSelectQueryFormData = QueryFormData &
   PluginFilterStylesProps &
   PluginFilterSelectCustomizeProps;
 
+export interface PluginFilterSelectChartProps extends ChartProps {
+  queriesData: ChartDataResponseResult[];
+}
+
 export type PluginFilterSelectProps = PluginFilterStylesProps & {
+  coltypeMap: Record<string, GenericDataType>;
   data: DataRecord[];
-  setDataMask: SetDataMaskHook;
   behaviors: Behavior[];
+  appSection: AppSection;
   formData: PluginFilterSelectQueryFormData;
-};
+  filterState: FilterState;
+  isRefreshing: boolean;
+  showOverflow: boolean;
+  parentRef?: RefObject<any>;
+  inputRef?: RefObject<any>;
+} & PluginFilterHooks;
 
 export const DEFAULT_FORM_DATA: PluginFilterSelectCustomizeProps = {
   defaultValue: null,
-  currentValue: null,
   enableEmptyFilter: false,
-  fetchPredicate: '',
   inverseSelection: false,
-  multiSelect: false,
+  defaultToFirstItem: false,
+  multiSelect: true,
+  searchAllOptions: false,
+  sortAscending: true,
 };

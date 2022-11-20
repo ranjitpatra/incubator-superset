@@ -16,27 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { RefObject } from 'react';
-import Select from 'src/components/Select';
+import React from 'react';
+import Select from 'src/components/Select/Select';
 import { t, styled } from '@superset-ui/core';
 import Alert from 'src/components/Alert';
 import Button from 'src/components/Button';
 
-import ModalTrigger from 'src/components/ModalTrigger';
-import FormLabel from 'src/components/FormLabel';
-
-export const options = [
-  [0, t("Don't refresh")],
-  [10, t('10 seconds')],
-  [30, t('30 seconds')],
-  [60, t('1 minute')],
-  [300, t('5 minutes')],
-  [1800, t('30 minutes')],
-  [3600, t('1 hour')],
-  [21600, t('6 hours')],
-  [43200, t('12 hours')],
-  [86400, t('24 hours')],
-].map(o => ({ value: o[0], label: o[1] }));
+import ModalTrigger, { ModalTriggerRef } from 'src/components/ModalTrigger';
+import { FormLabel } from 'src/components/Form';
+import { propertyComparator } from 'src/components/Select/utils';
 
 const StyledModalTrigger = styled(ModalTrigger)`
   .ant-modal-body {
@@ -49,12 +37,14 @@ const RefreshWarningContainer = styled.div`
 `;
 
 type RefreshIntervalModalProps = {
+  addSuccessToast: (msg: string) => void;
   triggerNode: JSX.Element;
   refreshFrequency: number;
   onChange: (refreshLimit: number, editMode: boolean) => void;
   editMode: boolean;
   refreshLimit?: number;
   refreshWarning: string | null;
+  refreshIntervalOptions: [number, string][];
 };
 
 type RefreshIntervalModalState = {
@@ -70,11 +60,11 @@ class RefreshIntervalModal extends React.PureComponent<
     refreshWarning: null,
   };
 
-  modalRef: RefObject<ModalTrigger>;
+  modalRef: ModalTriggerRef | null;
 
   constructor(props: RefreshIntervalModalProps) {
     super(props);
-    this.modalRef = React.createRef();
+    this.modalRef = React.createRef() as ModalTriggerRef;
     this.state = {
       refreshFrequency: props.refreshFrequency,
     };
@@ -85,25 +75,31 @@ class RefreshIntervalModal extends React.PureComponent<
 
   onSave() {
     this.props.onChange(this.state.refreshFrequency, this.props.editMode);
-    this.modalRef.current?.close();
+    this.modalRef?.current?.close();
+    this.props.addSuccessToast(t('Refresh interval saved'));
   }
 
   onCancel() {
     this.setState({
       refreshFrequency: this.props.refreshFrequency,
     });
-    this.modalRef.current?.close();
+    this.modalRef?.current?.close();
   }
 
-  handleFrequencyChange(opt: Record<string, any>) {
-    const value = opt ? opt.value : options[0].value;
+  handleFrequencyChange(value: number) {
+    const { refreshIntervalOptions } = this.props;
     this.setState({
-      refreshFrequency: value,
+      refreshFrequency: value || refreshIntervalOptions[0][0],
     });
   }
 
   render() {
-    const { refreshLimit = 0, refreshWarning, editMode } = this.props;
+    const {
+      refreshLimit = 0,
+      refreshWarning,
+      editMode,
+      refreshIntervalOptions,
+    } = this.props;
     const { refreshFrequency = 0 } = this.state;
     const showRefreshWarning =
       !!refreshFrequency && !!refreshWarning && refreshFrequency < refreshLimit;
@@ -117,10 +113,14 @@ class RefreshIntervalModal extends React.PureComponent<
           <div>
             <FormLabel>{t('Refresh frequency')}</FormLabel>
             <Select
-              options={options}
-              value={{ value: refreshFrequency }}
+              ariaLabel={t('Refresh interval')}
+              options={refreshIntervalOptions.map(option => ({
+                value: option[0],
+                label: t(option[1]),
+              }))}
+              value={refreshFrequency}
               onChange={this.handleFrequencyChange}
-              forceOverflow
+              sortComparator={propertyComparator('value')}
             />
             {showRefreshWarning && (
               <RefreshWarningContainer>

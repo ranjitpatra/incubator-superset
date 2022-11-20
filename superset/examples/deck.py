@@ -14,14 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# pylint: disable=too-many-statements
 import json
 
 from superset import db
 from superset.models.dashboard import Dashboard
 from superset.models.slice import Slice
+from superset.utils.core import DatasourceType
 
-from .helpers import get_slice_json, merge_slice, TBL, update_slice_ids
+from .helpers import (
+    get_slice_json,
+    get_table_connector_registry,
+    merge_slice,
+    update_slice_ids,
+)
 
 COLOR_RED = {"r": 205, "g": 0, "b": 3, "a": 0.82}
 POSITION_JSON = """\
@@ -29,6 +34,7 @@ POSITION_JSON = """\
     "CHART-3afd9d70": {
         "meta": {
             "chartId": 66,
+            "sliceName": "Deck.gl Scatterplot",
             "width": 6,
             "height": 50
         },
@@ -39,6 +45,7 @@ POSITION_JSON = """\
     "CHART-2ee7fa5e": {
         "meta": {
             "chartId": 67,
+            "sliceName": "Deck.gl Screen grid",
             "width": 6,
             "height": 50
         },
@@ -49,6 +56,7 @@ POSITION_JSON = """\
     "CHART-201f7715": {
         "meta": {
             "chartId": 68,
+            "sliceName": "Deck.gl Hexagons",
             "width": 6,
             "height": 50
         },
@@ -59,6 +67,7 @@ POSITION_JSON = """\
     "CHART-d02f6c40": {
         "meta": {
             "chartId": 69,
+            "sliceName": "Deck.gl Grid",
             "width": 6,
             "height": 50
         },
@@ -69,6 +78,7 @@ POSITION_JSON = """\
     "CHART-2673431d": {
         "meta": {
             "chartId": 70,
+            "sliceName": "Deck.gl Polygons",
             "width": 6,
             "height": 50
         },
@@ -79,6 +89,7 @@ POSITION_JSON = """\
     "CHART-85265a60": {
         "meta": {
             "chartId": 71,
+            "sliceName": "Deck.gl Arcs",
             "width": 6,
             "height": 50
         },
@@ -89,6 +100,7 @@ POSITION_JSON = """\
     "CHART-2b87513c": {
         "meta": {
             "chartId": 72,
+            "sliceName": "Deck.gl Path",
             "width": 6,
             "height": 50
         },
@@ -167,10 +179,11 @@ POSITION_JSON = """\
 }"""
 
 
-def load_deck_dash() -> None:
+def load_deck_dash() -> None:  # pylint: disable=too-many-statements
     print("Loading deck.gl dashboard")
     slices = []
-    tbl = db.session.query(TBL).filter_by(table_name="long_lat").first()
+    table = get_table_connector_registry()
+    tbl = db.session.query(table).filter_by(table_name="long_lat").first()
     slice_data = {
         "spatial": {"type": "latlong", "lonCol": "LON", "latCol": "LAT"},
         "color_picker": COLOR_RED,
@@ -185,7 +198,6 @@ def load_deck_dash() -> None:
         "max_radius": 250,
         "row_limit": 5000,
         "time_range": " : ",
-        "time_range_endpoints": ["inclusive", "exclusive"],
         "size": "count",
         "time_grain_sqla": None,
         "viewport": {
@@ -200,9 +212,9 @@ def load_deck_dash() -> None:
 
     print("Creating Scatterplot slice")
     slc = Slice(
-        slice_name="Scatterplot",
+        slice_name="Deck.gl Scatterplot",
         viz_type="deck_scatter",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=get_slice_json(slice_data),
     )
@@ -235,9 +247,9 @@ def load_deck_dash() -> None:
     }
     print("Creating Screen Grid slice")
     slc = Slice(
-        slice_name="Screen grid",
+        slice_name="Deck.gl Screen grid",
         viz_type="deck_screengrid",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=get_slice_json(slice_data),
     )
@@ -271,9 +283,9 @@ def load_deck_dash() -> None:
     }
     print("Creating Hex slice")
     slc = Slice(
-        slice_name="Hexagons",
+        slice_name="Deck.gl Hexagons",
         viz_type="deck_hex",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=get_slice_json(slice_data),
     )
@@ -281,6 +293,7 @@ def load_deck_dash() -> None:
     slices.append(slc)
 
     slice_data = {
+        "autozoom": False,
         "spatial": {"type": "latlong", "lonCol": "LON", "latCol": "LAT"},
         "row_limit": 5000,
         "mapbox_style": "mapbox://styles/mapbox/satellite-streets-v9",
@@ -307,9 +320,9 @@ def load_deck_dash() -> None:
     }
     print("Creating Grid slice")
     slc = Slice(
-        slice_name="Grid",
+        slice_name="Deck.gl Grid",
         viz_type="deck_grid",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=tbl.id,
         params=get_slice_json(slice_data),
     )
@@ -317,7 +330,7 @@ def load_deck_dash() -> None:
     slices.append(slc)
 
     polygon_tbl = (
-        db.session.query(TBL).filter_by(table_name="sf_population_polygons").first()
+        db.session.query(table).filter_by(table_name="sf_population_polygons").first()
     )
     slice_data = {
         "datasource": "11__table",
@@ -396,9 +409,9 @@ def load_deck_dash() -> None:
 
     print("Creating Polygon slice")
     slc = Slice(
-        slice_name="Polygons",
+        slice_name="Deck.gl Polygons",
         viz_type="deck_polygon",
-        datasource_type="table",
+        datasource_type=DatasourceType.TABLE,
         datasource_id=polygon_tbl.id,
         params=get_slice_json(slice_data),
     )
@@ -446,10 +459,13 @@ def load_deck_dash() -> None:
 
     print("Creating Arc slice")
     slc = Slice(
-        slice_name="Arcs",
+        slice_name="Deck.gl Arcs",
         viz_type="deck_arc",
-        datasource_type="table",
-        datasource_id=db.session.query(TBL).filter_by(table_name="flights").first().id,
+        datasource_type=DatasourceType.TABLE,
+        datasource_id=db.session.query(table)
+        .filter_by(table_name="flights")
+        .first()
+        .id,
         params=get_slice_json(slice_data),
     )
     merge_slice(slc)
@@ -495,10 +511,10 @@ def load_deck_dash() -> None:
 
     print("Creating Path slice")
     slc = Slice(
-        slice_name="Path",
+        slice_name="Deck.gl Path",
         viz_type="deck_path",
-        datasource_type="table",
-        datasource_id=db.session.query(TBL)
+        datasource_type=DatasourceType.TABLE,
+        datasource_id=db.session.query(table)
         .filter_by(table_name="bart_lines")
         .first()
         .id,
@@ -517,14 +533,10 @@ def load_deck_dash() -> None:
     dash.published = True
     js = POSITION_JSON
     pos = json.loads(js)
-    update_slice_ids(pos, slices)
+    slices = update_slice_ids(pos)
     dash.position_json = json.dumps(pos, indent=4)
     dash.dashboard_title = title
     dash.slug = slug
     dash.slices = slices
     db.session.merge(dash)
     db.session.commit()
-
-
-if __name__ == "__main__":
-    load_deck_dash()

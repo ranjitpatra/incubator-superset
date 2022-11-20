@@ -17,17 +17,21 @@
  * under the License.
  */
 import { ReactNode } from 'react';
-import { AdhocFilter } from '@superset-ui/core';
-import { ColumnMeta, Metric } from '@superset-ui/chart-controls';
-import { DatasourcePanelDndItem } from '../../DatasourcePanel/types';
-import { DndItemType } from '../../DndItemType';
+import { AdhocColumn, JsonValue } from '@superset-ui/core';
+import { ControlComponentProps } from 'src/explore/components/Control';
+import { ColumnMeta } from '@superset-ui/chart-controls';
 
 export interface OptionProps {
-  children: ReactNode;
+  children?: ReactNode;
   index: number;
+  label?: string;
+  tooltipTitle?: string;
+  column?: ColumnMeta | AdhocColumn;
   clickClose: (index: number) => void;
-  onShiftOptions: (dragIndex: number, hoverIndex: number) => void;
   withCaret?: boolean;
+  isExtra?: boolean;
+  datasourceWarningMessage?: string;
+  canDelete?: boolean;
 }
 
 export interface OptionItemInterface {
@@ -35,32 +39,16 @@ export interface OptionItemInterface {
   dragIndex: number;
 }
 
-export interface LabelProps<T = string[] | string> {
-  name: string;
-  value?: T;
-  onChange: (value?: T) => void;
-  options: { string: ColumnMeta };
-}
+/**
+ * Shared control props for all DnD control.
+ */
+export type DndControlProps<ValueType extends JsonValue> =
+  ControlComponentProps<ValueType | ValueType[] | null> & {
+    multi?: boolean;
+    canDelete?: boolean;
+    ghostButtonText?: string;
+    clickEnabledGhostButtonText?: string;
+    onChange: (value: ValueType | ValueType[] | null | undefined) => void;
+  };
 
-export interface DndColumnSelectProps<
-  T = string[] | string,
-  O = string[] | string
-> extends LabelProps<T> {
-  values?: O;
-  onDrop: (item: DatasourcePanelDndItem) => void;
-  canDrop: (item: DatasourcePanelDndItem) => boolean;
-  valuesRenderer: () => ReactNode;
-  accept: DndItemType | DndItemType[];
-}
-
-export type FilterOptionValueType = Record<string, any> | AdhocFilter;
-export interface DndFilterSelectProps {
-  name: string;
-  value: FilterOptionValueType[];
-  columns: ColumnMeta[];
-  datasource: Record<string, any>;
-  formData: Record<string, any>;
-  savedMetrics: Metric[];
-  onChange: (filters: FilterOptionValueType[]) => void;
-  options: { string: ColumnMeta };
-}
+export type OptionValueType = Record<string, any>;

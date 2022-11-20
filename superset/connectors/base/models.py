@@ -14,26 +14,36 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import json
+from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Hashable, List, Optional, Type, Union
+from typing import Any, Dict, Hashable, List, Optional, Set, Type, TYPE_CHECKING, Union
 
 from flask_appbuilder.security.sqla.models import User
 from sqlalchemy import and_, Boolean, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.orm import foreign, Query, relationship, RelationshipProperty
+from sqlalchemy.orm import foreign, Query, relationship, RelationshipProperty, Session
+from sqlalchemy.sql import literal_column
 
-from superset import security_manager
-from superset.constants import NULL_STRING
+from superset import is_feature_enabled, security_manager
+from superset.constants import EMPTY_STRING, NULL_STRING
+from superset.datasets.commands.exceptions import DatasetNotFoundError
 from superset.models.helpers import AuditMixinNullable, ImportExportMixin, QueryResult
 from superset.models.slice import Slice
-from superset.typing import FilterValue, FilterValues, QueryObjectDict
+from superset.superset_typing import FilterValue, FilterValues, QueryObjectDict
 from superset.utils import core as utils
+from superset.utils.core import GenericDataType, MediumText
+
+if TYPE_CHECKING:
+    from superset.db_engine_specs.base import BaseEngineSpec
 
 METRIC_FORM_DATA_PARAMS = [
     "metric",
-    "metrics",
     "metric_2",
+    "metrics",
+    "metrics_b",
     "percent_metrics",
     "secondary_metric",
     "size",
@@ -100,23 +110,40 @@ class BaseDatasource(
     description = Column(Text)
     default_endpoint = Column(Text)
     is_featured = Column(Boolean, default=False)  # TODO deprecating
-    filter_select_enabled = Column(Boolean, default=False)
+    filter_select_enabled = Column(Boolean, default=is_feature_enabled("UX_BETA"))
     offset = Column(Integer, default=0)
     cache_timeout = Column(Integer)
     params = Column(String(1000))
     perm = Column(String(1000))
     schema_perm = Column(String(1000))
+    is_managed_externally = Column(Boolean, nullable=False, default=False)
+    external_url = Column(Text, nullable=True)
 
     sql: Optional[str] = None
     owners: List[User]
     update_from_object_fields: List[str]
 
-    @property
-    def kind(self) -> str:
-        if self.sql:
-            return DatasourceKind.VIRTUAL.value
+    extra_import_fields = ["is_managed_externally", "external_url"]
 
-        return DatasourceKind.PHYSICAL.value
+    @property
+    def kind(self) -> DatasourceKind:
+        return DatasourceKind.VIRTUAL if self.sql else DatasourceKind.PHYSICAL
+
+    @property
+    def owners_data(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "first_name": o.first_name,
+                "last_name": o.last_name,
+                "username": o.username,
+                "id": o.id,
+            }
+            for o in self.owners
+        ]
+
+    @property
+    def is_virtual(self) -> bool:
+        return self.kind == DatasourceKind.VIRTUAL
 
     @declared_attr
     def slices(self) -> RelationshipProperty:
@@ -182,7 +209,7 @@ class BaseDatasource(
     def explore_url(self) -> str:
         if self.default_endpoint:
             return self.default_endpoint
-        return f"/superset/explore/{self.type}/{self.id}/"
+        return f"/explore/?dataset_type={self.type}&dataset_id={self.id}"
 
     @property
     def column_formats(self) -> Dict[str, Optional[str]]:
@@ -237,6 +264,7 @@ class BaseDatasource(
         return {
             # simple fields
             "id": self.id,
+            "uid": self.uid,
             "column_formats": self.column_formats,
             "description": self.description,
             "database": self.database.data,  # pylint: disable=no-member
@@ -265,7 +293,9 @@ class BaseDatasource(
             "select_star": self.select_star,
         }
 
-    def data_for_slices(self, slices: List[Slice]) -> Dict[str, Any]:
+    def data_for_slices(  # pylint: disable=too-many-locals
+        self, slices: List[Slice]
+    ) -> Dict[str, Any]:
         """
         The representation of the datasource containing only the required data
         to render the provided slices.
@@ -277,25 +307,54 @@ class BaseDatasource(
         column_names = set()
         for slc in slices:
             form_data = slc.form_data
-
             # pull out all required metrics from the form_data
-            for param in METRIC_FORM_DATA_PARAMS:
-                for metric in utils.get_iterable(form_data.get(param) or []):
+            for metric_param in METRIC_FORM_DATA_PARAMS:
+                for metric in utils.get_iterable(form_data.get(metric_param) or []):
                     metric_names.add(utils.get_metric_name(metric))
-
                     if utils.is_adhoc_metric(metric):
                         column_names.add(
                             (metric.get("column") or {}).get("column_name")
                         )
 
-            # pull out all required columns from the form_data
-            for filter_ in form_data.get("adhoc_filters") or []:
-                if filter_["clause"] == "WHERE" and filter_.get("subject"):
-                    column_names.add(filter_.get("subject"))
+            # Columns used in query filters
+            column_names.update(
+                filter_["subject"]
+                for filter_ in form_data.get("adhoc_filters") or []
+                if filter_.get("clause") == "WHERE" and filter_.get("subject")
+            )
 
-            for param in COLUMN_FORM_DATA_PARAMS:
-                for column in utils.get_iterable(form_data.get(param) or []):
-                    column_names.add(column)
+            # columns used by Filter Box
+            column_names.update(
+                filter_config["column"]
+                for filter_config in form_data.get("filter_configs") or []
+                if "column" in filter_config
+            )
+
+            # for legacy dashboard imports which have the wrong query_context in them
+            try:
+                query_context = slc.get_query_context()
+            except DatasetNotFoundError:
+                query_context = None
+
+            # legacy charts don't have query_context charts
+            if query_context:
+                column_names.update(
+                    [
+                        utils.get_column_name(column)
+                        for query in query_context.queries
+                        for column in query.columns
+                    ]
+                    or []
+                )
+            else:
+                _columns = [
+                    utils.get_column_name(column)
+                    if utils.is_adhoc_column(column)
+                    else column
+                    for column_param in COLUMN_FORM_DATA_PARAMS
+                    for column in utils.get_iterable(form_data.get(column_param) or [])
+                ]
+                column_names.update(_columns)
 
         filtered_metrics = [
             metric
@@ -303,12 +362,16 @@ class BaseDatasource(
             if metric["metric_name"] in metric_names
         ]
 
-        filtered_columns = [
-            column
-            for column in data["columns"]
-            if column["column_name"] in column_names
-        ]
+        filtered_columns: List[Column] = []
+        column_types: Set[GenericDataType] = set()
+        for column in data["columns"]:
+            generic_type = column.get("type_generic")
+            if generic_type is not None:
+                column_types.add(generic_type)
+            if column["column_name"] in column_names:
+                filtered_columns.append(column)
 
+        data["column_types"] = list(column_types)
         del data["description"]
         data.update({"metrics": filtered_metrics})
         data.update({"columns": filtered_columns})
@@ -330,26 +393,43 @@ class BaseDatasource(
         return data
 
     @staticmethod
-    def filter_values_handler(
+    def filter_values_handler(  # pylint: disable=too-many-arguments
         values: Optional[FilterValues],
-        target_column_is_numeric: bool = False,
+        target_generic_type: GenericDataType,
+        target_native_type: Optional[str] = None,
         is_list_target: bool = False,
+        db_engine_spec: Optional[Type[BaseEngineSpec]] = None,
+        db_extra: Optional[Dict[str, Any]] = None,
     ) -> Optional[FilterValues]:
         if values is None:
             return None
 
         def handle_single_value(value: Optional[FilterValue]) -> Optional[FilterValue]:
-            # backward compatibility with previous <select> components
+            if (
+                isinstance(value, (float, int))
+                and target_generic_type == utils.GenericDataType.TEMPORAL
+                and target_native_type is not None
+                and db_engine_spec is not None
+            ):
+                value = db_engine_spec.convert_dttm(
+                    target_type=target_native_type,
+                    dttm=datetime.utcfromtimestamp(value / 1000),
+                    db_extra=db_extra,
+                )
+                value = literal_column(value)
             if isinstance(value, str):
-                value = value.strip("\t\n'\"")
-                if target_column_is_numeric:
+                value = value.strip("\t\n")
+
+                if target_generic_type == utils.GenericDataType.NUMERIC:
                     # For backwards compatibility and edge cases
                     # where a column data type might have changed
-                    value = utils.cast_to_num(value)
+                    return utils.cast_to_num(value)
                 if value == NULL_STRING:
                     return None
-                if value == "<empty string>":
+                if value == EMPTY_STRING:
                     return ""
+            if target_generic_type == utils.GenericDataType.BOOLEAN:
+                return utils.cast_to_boolean(value)
             return value
 
         if isinstance(values, (list, tuple)):
@@ -369,7 +449,7 @@ class BaseDatasource(
     def get_query_str(self, query_obj: QueryObjectDict) -> str:
         """Returns a query as a string
 
-        This is used to be displayed to the user so that she/he can
+        This is used to be displayed to the user so that they can
         understand what is taking place behind the scene"""
         raise NotImplementedError()
 
@@ -502,6 +582,12 @@ class BaseDatasource(
 
         security_manager.raise_for_access(datasource=self)
 
+    @classmethod
+    def get_datasource_by_name(
+        cls, session: Session, datasource_name: str, schema: str, database_name: str
+    ) -> Optional["BaseDatasource"]:
+        raise NotImplementedError()
+
 
 class BaseColumn(AuditMixinNullable, ImportExportMixin):
     """Interface for column"""
@@ -512,10 +598,11 @@ class BaseColumn(AuditMixinNullable, ImportExportMixin):
     column_name = Column(String(255), nullable=False)
     verbose_name = Column(String(1024))
     is_active = Column(Boolean, default=True)
-    type = Column(String(32))
+    type = Column(Text)
+    advanced_data_type = Column(String(255))
     groupby = Column(Boolean, default=True)
     filterable = Column(Boolean, default=True)
-    description = Column(Text)
+    description = Column(MediumText())
     is_dttm = None
 
     # [optional] Set this to support import/export functionality
@@ -524,6 +611,7 @@ class BaseColumn(AuditMixinNullable, ImportExportMixin):
     def __repr__(self) -> str:
         return str(self.column_name)
 
+    bool_types = ("BOOL",)
     num_types = (
         "DOUBLE",
         "FLOAT",
@@ -552,6 +640,22 @@ class BaseColumn(AuditMixinNullable, ImportExportMixin):
         return self.type and any(map(lambda t: t in self.type.upper(), self.str_types))
 
     @property
+    def is_boolean(self) -> bool:
+        return self.type and any(map(lambda t: t in self.type.upper(), self.bool_types))
+
+    @property
+    def type_generic(self) -> Optional[utils.GenericDataType]:
+        if self.is_string:
+            return utils.GenericDataType.STRING
+        if self.is_boolean:
+            return utils.GenericDataType.BOOLEAN
+        if self.is_numeric:
+            return utils.GenericDataType.NUMERIC
+        if self.is_temporal:
+            return utils.GenericDataType.TEMPORAL
+        return None
+
+    @property
     def expression(self) -> Column:
         raise NotImplementedError()
 
@@ -571,12 +675,12 @@ class BaseColumn(AuditMixinNullable, ImportExportMixin):
             "groupby",
             "is_dttm",
             "type",
+            "advanced_data_type",
         )
         return {s: getattr(self, s) for s in attrs if hasattr(self, s)}
 
 
 class BaseMetric(AuditMixinNullable, ImportExportMixin):
-
     """Interface for Metrics"""
 
     __tablename__: Optional[str] = None  # {connector_name}_metric
@@ -585,7 +689,7 @@ class BaseMetric(AuditMixinNullable, ImportExportMixin):
     metric_name = Column(String(255), nullable=False)
     verbose_name = Column(String(1024))
     metric_type = Column(String(32))
-    description = Column(Text)
+    description = Column(MediumText())
     d3format = Column(String(128))
     warning_text = Column(Text)
 

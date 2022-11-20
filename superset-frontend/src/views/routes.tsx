@@ -21,6 +21,12 @@ import React, { lazy } from 'react';
 // not lazy loaded since this is the home page.
 import Welcome from 'src/views/CRUD/welcome/Welcome';
 
+const AddSliceContainer = lazy(
+  () =>
+    import(
+      /* webpackChunkName: "AddSliceContainer" */ 'src/addSlice/AddSliceContainer'
+    ),
+);
 const AnnotationLayersList = lazy(
   () =>
     import(
@@ -57,6 +63,12 @@ const DashboardList = lazy(
       /* webpackChunkName: "DashboardList" */ 'src/views/CRUD/dashboard/DashboardList'
     ),
 );
+const DashboardRoute = lazy(
+  () =>
+    import(
+      /* webpackChunkName: "DashboardRoute" */ 'src/dashboard/containers/DashboardRoute'
+    ),
+);
 const DatabaseList = lazy(
   () =>
     import(
@@ -69,11 +81,22 @@ const DatasetList = lazy(
       /* webpackChunkName: "DatasetList" */ 'src/views/CRUD/data/dataset/DatasetList'
     ),
 );
+
+const AddDataset = lazy(
+  () =>
+    import(
+      /* webpackChunkName: "DatasetEditor" */ 'src/views/CRUD/data/dataset/AddDataset/index'
+    ),
+);
+
 const ExecutionLog = lazy(
   () =>
     import(
       /* webpackChunkName: "ExecutionLog" */ 'src/views/CRUD/alert/ExecutionLog'
     ),
+);
+const ExplorePage = lazy(
+  () => import(/* webpackChunkName: "ExplorePage" */ 'src/explore/ExplorePage'),
 );
 const QueryList = lazy(
   () =>
@@ -103,6 +126,14 @@ export const routes: Routes = [
   {
     path: '/dashboard/list/',
     Component: DashboardList,
+  },
+  {
+    path: '/superset/dashboard/:idOrSlug/',
+    Component: DashboardRoute,
+  },
+  {
+    path: '/chart/add',
+    Component: AddSliceContainer,
   },
   {
     path: '/chart/list/',
@@ -158,9 +189,25 @@ export const routes: Routes = [
       isReportEnabled: true,
     },
   },
+  {
+    path: '/explore/',
+    Component: ExplorePage,
+  },
+  {
+    path: '/superset/explore/p',
+    Component: ExplorePage,
+  },
+  {
+    path: '/dataset/add/',
+    Component: AddDataset,
+  },
+  {
+    path: '/dataset/:datasetId',
+    Component: AddDataset,
+  },
 ];
 
-export const frontEndRoutes = routes
+const frontEndRoutes = routes
   .map(r => r.path)
   .reduce(
     (acc, curr) => ({

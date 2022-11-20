@@ -19,18 +19,34 @@
 /* eslint-env browser */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { List } from 'react-virtualized';
-import SearchInput, { createFilter } from 'react-search-input';
-import { t } from '@superset-ui/core';
-
-import { Select } from 'src/common/components';
+import { List, AutoSizer } from 'react-virtualized';
+import { createFilter } from 'react-search-input';
+import {
+  t,
+  styled,
+  isFeatureEnabled,
+  FeatureFlag,
+  css,
+} from '@superset-ui/core';
+import { Input } from 'src/components/Input';
+import { Select } from 'src/components';
+import Loading from 'src/components/Loading';
+import Button from 'src/components/Button';
+import Icons from 'src/components/Icons';
+import {
+  CHART_TYPE,
+  NEW_COMPONENT_SOURCE_TYPE,
+} from 'src/dashboard/util/componentTypes';
+import {
+  NEW_CHART_ID,
+  NEW_COMPONENTS_SOURCE_ID,
+} from 'src/dashboard/util/constants';
+import { slicePropShape } from 'src/dashboard/util/propShapes';
+import { FILTER_BOX_MIGRATION_STATES } from 'src/explore/constants';
+import _ from 'lodash';
 import AddSliceCard from './AddSliceCard';
 import AddSliceDragPreview from './dnd/AddSliceDragPreview';
 import DragDroppable from './dnd/DragDroppable';
-import Loading from '../../components/Loading';
-import { CHART_TYPE, NEW_COMPONENT_SOURCE_TYPE } from '../util/componentTypes';
-import { NEW_CHART_ID, NEW_COMPONENTS_SOURCE_ID } from '../util/constants';
-import { slicePropShape } from '../util/propShapes';
 
 const propTypes = {
   fetchAllSlices: PropTypes.func.isRequired,
@@ -41,30 +57,67 @@ const propTypes = {
   userId: PropTypes.string.isRequired,
   selectedSliceIds: PropTypes.arrayOf(PropTypes.number),
   editMode: PropTypes.bool,
-  height: PropTypes.number,
+  filterboxMigrationState: FILTER_BOX_MIGRATION_STATES,
+  dashboardId: PropTypes.number,
 };
 
 const defaultProps = {
   selectedSliceIds: [],
   editMode: false,
   errorMessage: '',
-  height: window.innerHeight,
+  filterboxMigrationState: FILTER_BOX_MIGRATION_STATES.NOOP,
 };
 
 const KEYS_TO_FILTERS = ['slice_name', 'viz_type', 'datasource_name'];
 const KEYS_TO_SORT = {
-  slice_name: 'Name',
-  viz_type: 'Vis type',
-  datasource_name: 'Dataset',
-  changed_on: 'Recent',
+  slice_name: t('name'),
+  viz_type: t('viz type'),
+  datasource_name: t('dataset'),
+  changed_on: t('recent'),
 };
 
 const DEFAULT_SORT_KEY = 'changed_on';
 
-const MARGIN_BOTTOM = 16;
-const SIDEPANE_HEADER_HEIGHT = 30;
-const SLICE_ADDER_CONTROL_HEIGHT = 64;
-const DEFAULT_CELL_HEIGHT = 112;
+const DEFAULT_CELL_HEIGHT = 128;
+
+const Controls = styled.div`
+  display: flex;
+  flex-direction: row;
+  padding: ${({ theme }) => theme.gridUnit * 3}px;
+  padding-top: ${({ theme }) => theme.gridUnit * 4}px;
+`;
+
+const StyledSelect = styled(Select)`
+  margin-left: ${({ theme }) => theme.gridUnit * 2}px;
+  min-width: 150px;
+`;
+
+const NewChartButtonContainer = styled.div`
+  ${({ theme }) => css`
+    display: flex;
+    justify-content: flex-end;
+    padding-right: ${theme.gridUnit * 2}px;
+  `}
+`;
+
+const NewChartButton = styled(Button)`
+  ${({ theme }) => css`
+    height: auto;
+    & > .anticon + span {
+      margin-left: 0;
+    }
+    & > [role='img']:first-of-type {
+      margin-right: ${theme.gridUnit}px;
+      padding-bottom: 1px;
+      line-height: 0;
+    }
+  `}
+`;
+
+export const ChartList = styled.div`
+  flex-grow: 1;
+  min-height: 0;
+`;
 
 class SliceAdder extends React.Component {
   static sortByComparator(attr) {
@@ -96,7 +149,12 @@ class SliceAdder extends React.Component {
   }
 
   componentDidMount() {
-    this.slicesRequest = this.props.fetchAllSlices(this.props.userId);
+    const { userId, filterboxMigrationState } = this.props;
+    this.slicesRequest = this.props.fetchAllSlices(
+      userId,
+      isFeatureEnabled(FeatureFlag.ENABLE_FILTER_BOX_MIGRATION) &&
+        filterboxMigrationState !== FILTER_BOX_MIGRATION_STATES.SNOOZED,
+    );
   }
 
   UNSAFE_componentWillReceiveProps(nextProps) {
@@ -136,6 +194,18 @@ class SliceAdder extends React.Component {
     }
   }
 
+  handleChange = _.debounce(value => {
+    this.searchUpdated(value);
+
+    const { userId, filterboxMigrationState } = this.props;
+    this.slicesRequest = this.props.fetchFilteredSlices(
+      userId,
+      isFeatureEnabled(FeatureFlag.ENABLE_FILTER_BOX_MIGRATION) &&
+        filterboxMigrationState !== FILTER_BOX_MIGRATION_STATES.SNOOZED,
+      value,
+    );
+  }, 300);
+
   searchUpdated(searchTerm) {
     this.setState(prevState => ({
       searchTerm,
@@ -154,6 +224,14 @@ class SliceAdder extends React.Component {
         sortBy,
       ),
     }));
+
+    const { userId, filterboxMigrationState } = this.props;
+    this.slicesRequest = this.props.fetchSortedSlices(
+      userId,
+      isFeatureEnabled(FeatureFlag.ENABLE_FILTER_BOX_MIGRATION) &&
+        filterboxMigrationState !== FILTER_BOX_MIGRATION_STATES.SNOOZED,
+      sortBy,
+    );
   }
 
   rowRenderer({ key, index, style }) {
@@ -195,6 +273,7 @@ class SliceAdder extends React.Component {
             visType={cellData.viz_type}
             datasourceUrl={cellData.datasource_url}
             datasourceName={cellData.datasource_name}
+            thumbnailUrl={cellData.thumbnail_url}
             isSelected={isSelected}
           />
         )}
@@ -203,48 +282,76 @@ class SliceAdder extends React.Component {
   }
 
   render() {
-    const slicesListHeight =
-      this.props.height -
-      SIDEPANE_HEADER_HEIGHT -
-      SLICE_ADDER_CONTROL_HEIGHT -
-      MARGIN_BOTTOM;
     return (
-      <div className="slice-adder-container">
-        <div className="controls">
-          <SearchInput
+      <div
+        css={css`
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        `}
+      >
+        <NewChartButtonContainer>
+          <NewChartButton
+            buttonStyle="link"
+            buttonSize="xsmall"
+            onClick={() =>
+              window.open(
+                `/chart/add?dashboard_id=${this.props.dashboardId}`,
+                '_blank',
+                'noopener noreferrer',
+              )
+            }
+          >
+            <Icons.PlusSmall />
+            {t('Create new chart')}
+          </NewChartButton>
+        </NewChartButtonContainer>
+        <Controls>
+          <Input
             placeholder={t('Filter your charts')}
             className="search-input"
-            onChange={this.searchUpdated}
+            onChange={ev => this.handleChange(ev.target.value)}
             onKeyPress={this.handleKeyPress}
             data-test="dashboard-charts-filter-search-input"
           />
-          <Select
+          <StyledSelect
             id="slice-adder-sortby"
-            defaultValue={DEFAULT_SORT_KEY}
+            value={this.state.sortBy}
             onChange={this.handleSelect}
-          >
-            {Object.entries(KEYS_TO_SORT).map(([key, label]) => (
-              <Select.Option key={key} value={key}>
-                Sort by {label}
-              </Select.Option>
-            ))}
-          </Select>
-        </div>
+            options={Object.entries(KEYS_TO_SORT).map(([key, label]) => ({
+              label: t('Sort by %s', label),
+              value: key,
+            }))}
+            placeholder={t('Sort by')}
+          />
+        </Controls>
         {this.props.isLoading && <Loading />}
         {!this.props.isLoading && this.state.filteredSlices.length > 0 && (
-          <List
-            width={376}
-            height={slicesListHeight}
-            rowCount={this.state.filteredSlices.length}
-            rowHeight={DEFAULT_CELL_HEIGHT}
-            rowRenderer={this.rowRenderer}
-            searchTerm={this.state.searchTerm}
-            sortBy={this.state.sortBy}
-            selectedSliceIds={this.props.selectedSliceIds}
-          />
+          <ChartList>
+            <AutoSizer>
+              {({ height, width }) => (
+                <List
+                  width={width}
+                  height={height}
+                  rowCount={this.state.filteredSlices.length}
+                  rowHeight={DEFAULT_CELL_HEIGHT}
+                  rowRenderer={this.rowRenderer}
+                  searchTerm={this.state.searchTerm}
+                  sortBy={this.state.sortBy}
+                  selectedSliceIds={this.props.selectedSliceIds}
+                />
+              )}
+            </AutoSizer>
+          </ChartList>
         )}
         {this.props.errorMessage && (
-          <div className="error-message">{this.props.errorMessage}</div>
+          <div
+            css={css`
+              padding: 16px;
+            `}
+          >
+            {this.props.errorMessage}
+          </div>
         )}
         {/* Drag preview is just a single fixed-position element */}
         <AddSliceDragPreview slices={this.state.filteredSlices} />

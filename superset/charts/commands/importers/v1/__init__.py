@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 from typing import Any, Dict, Set
 
 from marshmallow import Schema
@@ -88,11 +89,13 @@ class ImportChartsCommand(ImportModelsCommand):
                 config.update(
                     {
                         "datasource_id": dataset.id,
-                        "datasource_type": "view"
-                        if dataset.is_sqllab_view
-                        else "table",
+                        "datasource_type": "table",
                         "datasource_name": dataset.table_name,
                     }
                 )
                 config["params"].update({"datasource": dataset.uid})
+
+                if "query_context" in config:
+                    del config["query_context"]
+
                 import_chart(session, config, overwrite=overwrite)

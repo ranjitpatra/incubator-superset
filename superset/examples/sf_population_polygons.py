@@ -17,46 +17,51 @@
 import json
 
 import pandas as pd
-from sqlalchemy import BigInteger, Float, Text
+from sqlalchemy import BigInteger, Float, inspect, Text
 
+import superset.utils.database as database_utils
 from superset import db
-from superset.utils import core as utils
 
-from .helpers import get_example_data, TBL
+from .helpers import get_example_url, get_table_connector_registry
 
 
 def load_sf_population_polygons(
     only_metadata: bool = False, force: bool = False
 ) -> None:
     tbl_name = "sf_population_polygons"
-    database = utils.get_example_database()
-    table_exists = database.has_table_by_name(tbl_name)
+    database = database_utils.get_example_database()
+    with database.get_sqla_engine_with_context() as engine:
+        schema = inspect(engine).default_schema_name
+        table_exists = database.has_table_by_name(tbl_name)
 
-    if not only_metadata and (not table_exists or force):
-        data = get_example_data("sf_population.json.gz")
-        df = pd.read_json(data)
-        df["contour"] = df.contour.map(json.dumps)
+        if not only_metadata and (not table_exists or force):
+            url = get_example_url("sf_population.json.gz")
+            df = pd.read_json(url, compression="gzip")
+            df["contour"] = df.contour.map(json.dumps)
 
-        df.to_sql(
-            tbl_name,
-            database.get_sqla_engine(),
-            if_exists="replace",
-            chunksize=500,
-            dtype={
-                "zipcode": BigInteger,
-                "population": BigInteger,
-                "contour": Text,
-                "area": Float,
-            },
-            index=False,
-        )
+            df.to_sql(
+                tbl_name,
+                engine,
+                schema=schema,
+                if_exists="replace",
+                chunksize=500,
+                dtype={
+                    "zipcode": BigInteger,
+                    "population": BigInteger,
+                    "contour": Text,
+                    "area": Float,
+                },
+                index=False,
+            )
 
     print("Creating table {} reference".format(tbl_name))
-    tbl = db.session.query(TBL).filter_by(table_name=tbl_name).first()
+    table = get_table_connector_registry()
+    tbl = db.session.query(table).filter_by(table_name=tbl_name).first()
     if not tbl:
-        tbl = TBL(table_name=tbl_name)
+        tbl = table(table_name=tbl_name, schema=schema)
     tbl.description = "Population density of San Francisco"
     tbl.database = database
+    tbl.filter_select_enabled = True
     db.session.merge(tbl)
     db.session.commit()
     tbl.fetch_metadata()

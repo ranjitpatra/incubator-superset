@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import functools
 import inspect
 import json
@@ -22,18 +24,37 @@ import textwrap
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any, Callable, cast, Dict, Iterator, Optional, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 from flask import current_app, g, request
 from flask_appbuilder.const import API_URI_RIS_KEY
 from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import Literal
 
-from superset.stats_logger import BaseStatsLogger
+from superset.utils.core import get_user_id, LoggerLevel
+
+if TYPE_CHECKING:
+    from superset.stats_logger import BaseStatsLogger
+
+logger = logging.getLogger(__name__)
 
 
 def collect_request_payload() -> Dict[str, Any]:
     """Collect log payload identifiable from request context"""
+    if not request:
+        return {}
+
     payload: Dict[str, Any] = {
         "path": request.path,
         **request.form.to_dict(),
@@ -55,6 +76,24 @@ def collect_request_payload() -> Dict[str, Any]:
         del payload["rison"]
 
     return payload
+
+
+def get_logger_from_status(
+    status: int,
+) -> Tuple[Callable[..., None], str]:
+    """
+    Return logger method by status of exception.
+    Maps logger level to status code level
+    """
+    log_map = {
+        "2": LoggerLevel.INFO,
+        "3": LoggerLevel.INFO,
+        "4": LoggerLevel.WARNING,
+        "5": LoggerLevel.EXCEPTION,
+    }
+    log_level = log_map[str(status)[0]]
+
+    return (getattr(logger, log_level), log_level)
 
 
 class AbstractEventLogger(ABC):
@@ -109,17 +148,26 @@ class AbstractEventLogger(ABC):
         log_to_statsd: bool = True,
         **payload_override: Optional[Dict[str, Any]],
     ) -> None:
+        # pylint: disable=import-outside-toplevel
         from superset.views.core import get_form_data
 
-        referrer = request.referrer[:1000] if request.referrer else None
+        referrer = request.referrer[:1000] if request and request.referrer else None
 
         duration_ms = int(duration.total_seconds() * 1000) if duration else None
 
-        try:
-            user_id = g.user.get_id()
-        except Exception as ex:  # pylint: disable=broad-except
-            logging.warning(ex)
-            user_id = None
+        # Initial try and grab user_id via flask.g.user
+        user_id = get_user_id()
+
+        # Whenever a user is not bounded to a session we
+        # need to add them back before logging to capture user_id
+        if user_id is None:
+            try:
+                session = current_app.appbuilder.get_session
+                session.add(g.user)
+                user_id = get_user_id()
+            except Exception as ex:  # pylint: disable=broad-except
+                logging.warning(ex)
+                user_id = None
 
         payload = collect_request_payload()
         if object_ref:
@@ -166,8 +214,11 @@ class AbstractEventLogger(ABC):
         )
 
     @contextmanager
-    def log_context(  # pylint: disable=too-many-locals
-        self, action: str, object_ref: Optional[str] = None, log_to_statsd: bool = True,
+    def log_context(
+        self,
+        action: str,
+        object_ref: Optional[str] = None,
+        log_to_statsd: bool = True,
     ) -> Iterator[Callable[..., None]]:
         """
         Log an event with additional information from the request context.
@@ -294,6 +345,7 @@ class DBEventLogger(AbstractEventLogger):
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        # pylint: disable=import-outside-toplevel
         from superset.models.core import Log
 
         records = kwargs.get("records", [])

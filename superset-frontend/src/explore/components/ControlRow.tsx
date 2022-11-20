@@ -16,21 +16,37 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { ExpandedControlItem } from '@superset-ui/chart-controls';
-import React from 'react';
+import React, { useCallback } from 'react';
 
 const NUM_COLUMNS = 12;
 
-export default function ControlRow({
-  controls,
-}: {
-  controls: ExpandedControlItem[];
-}) {
-  const colSize = NUM_COLUMNS / controls.length;
+type Control = React.ReactElement | null;
+
+export default function ControlRow({ controls }: { controls: Control[] }) {
+  const isHiddenControl = useCallback(
+    (control: Control) =>
+      control?.props.type === 'HiddenControl' ||
+      control?.props.isVisible === false,
+    [],
+  );
+  // Invisible control should not be counted
+  // in the columns number
+  const countableControls = controls.filter(
+    control => !isHiddenControl(control),
+  );
+  const colSize = countableControls.length
+    ? NUM_COLUMNS / countableControls.length
+    : NUM_COLUMNS;
   return (
-    <div className="row space-1">
+    <div className="row">
       {controls.map((control, i) => (
-        <div className={`col-lg-${colSize} col-xs-12`} key={i}>
+        <div
+          className={`col-lg-${colSize} col-xs-12`}
+          style={{
+            display: isHiddenControl(control) ? 'none' : 'block',
+          }}
+          key={i}
+        >
           {control}
         </div>
       ))}

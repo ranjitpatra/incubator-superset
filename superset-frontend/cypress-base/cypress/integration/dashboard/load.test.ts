@@ -16,54 +16,43 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import {
-  getChartAliases,
-  isLegacyResponse,
-  getSliceIdFromRequestUrl,
-  JsonObject,
-} from '../../utils/vizPlugins';
-import { WORLD_HEALTH_DASHBOARD } from './dashboard.helper';
+import { WORLD_HEALTH_DASHBOARD } from 'cypress/utils/urls';
+import { waitForChartLoad } from 'cypress/utils';
+import { WORLD_HEALTH_CHARTS, interceptLog } from './utils';
 
 describe('Dashboard load', () => {
-  let dashboard;
-  let aliases: string[];
-  beforeEach(() => {
+  before(() => {
     cy.login();
+  });
 
-    cy.visit(WORLD_HEALTH_DASHBOARD);
-
-    cy.get('#app').then(nodes => {
-      const bootstrapData = JSON.parse(nodes[0].dataset.bootstrap || '');
-      dashboard = bootstrapData.dashboard_data;
-      const { slices } = dashboard;
-      // then define routes and create alias for each requests
-      aliases = getChartAliases(slices);
-    });
+  beforeEach(() => {
+    cy.preserveLogin();
   });
 
   it('should load dashboard', () => {
-    // wait and verify one-by-one
-    cy.wait(aliases).then(requests =>
-      Promise.all(
-        requests.map(async ({ response, request }) => {
-          const responseBody = response?.body;
-          let sliceId;
-          if (isLegacyResponse(responseBody)) {
-            expect(responseBody).to.have.property('errors');
-            expect(responseBody.errors.length).to.eq(0);
-            sliceId = responseBody.form_data.slice_id;
-          } else {
-            sliceId = getSliceIdFromRequestUrl(request.url);
-            responseBody.result.forEach((element: JsonObject) => {
-              expect(element).to.have.property('error', null);
-              expect(element).to.have.property('status', 'success');
-            });
-          }
-          cy.get('[data-test="grid-content"]')
-            .find(`#chart-id-${sliceId}`)
-            .should('be.visible');
-        }),
-      ),
-    );
+    cy.visit(WORLD_HEALTH_DASHBOARD);
+    WORLD_HEALTH_CHARTS.forEach(waitForChartLoad);
+  });
+
+  it('should load in edit mode', () => {
+    cy.visit(`${WORLD_HEALTH_DASHBOARD}?edit=true&standalone=true`);
+    cy.getBySel('discard-changes-button').should('be.visible');
+  });
+
+  it('should load in standalone mode', () => {
+    cy.visit(`${WORLD_HEALTH_DASHBOARD}?edit=true&standalone=true`);
+    cy.get('#app-menu').should('not.exist');
+  });
+
+  it('should load in edit/standalone mode', () => {
+    cy.visit(`${WORLD_HEALTH_DASHBOARD}?edit=true&standalone=true`);
+    cy.getBySel('discard-changes-button').should('be.visible');
+    cy.get('#app-menu').should('not.exist');
+  });
+
+  it('should send log data', () => {
+    interceptLog();
+    cy.visit(WORLD_HEALTH_DASHBOARD);
+    cy.wait('@logs');
   });
 });

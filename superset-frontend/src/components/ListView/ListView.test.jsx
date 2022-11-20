@@ -23,17 +23,19 @@ import { QueryParamProvider } from 'use-query-params';
 import { supersetTheme, ThemeProvider } from '@superset-ui/core';
 
 import Button from 'src/components/Button';
-import { Empty } from 'src/common/components';
+import { Empty } from 'src/components';
 import CardCollection from 'src/components/ListView/CardCollection';
 import { CardSortSelect } from 'src/components/ListView/CardSortSelect';
 import IndeterminateCheckbox from 'src/components/IndeterminateCheckbox';
 import ListView from 'src/components/ListView/ListView';
 import ListViewFilters from 'src/components/ListView/Filters';
-import ListViewPagination from 'src/components/dataViewCommon/Pagination';
-import TableCollection from 'src/components/dataViewCommon/TableCollection';
-import Pagination from 'src/components/Pagination';
+import ListViewPagination from 'src/components/Pagination';
+import TableCollection from 'src/components/TableCollection';
+import Pagination from 'src/components/Pagination/Wrapper';
 
 import waitForComponentToPaint from 'spec/helpers/waitForComponentToPaint';
+
+jest.mock('src/components/Icons/Icon', () => () => <span />);
 
 function makeMockLocation(query) {
   const queryStr = encodeURIComponent(query);
@@ -377,8 +379,8 @@ describe('ListView', () => {
     expect(wrapper.find(ListViewFilters)).toExist();
   });
 
-  it('fetched async filter values on mount', () => {
-    expect(fetchSelectsMock).toHaveBeenCalled();
+  it('does not fetch async filter values on mount', () => {
+    expect(fetchSelectsMock).not.toHaveBeenCalled();
   });
 
   it('calls fetchData on filter', () => {
@@ -387,7 +389,7 @@ describe('ListView', () => {
         .find('[data-test="filters-select"]')
         .first()
         .props()
-        .onChange({ value: 'bar' });
+        .onChange({ label: 'bar', value: 'bar' });
     });
 
     act(() => {
@@ -395,13 +397,15 @@ describe('ListView', () => {
         .find('[data-test="filters-search"]')
         .first()
         .props()
-        .onChange({ currentTarget: { value: 'something' } });
+        .onChange({
+          currentTarget: { label: 'something', value: 'something' },
+        });
     });
 
     wrapper.update();
 
     act(() => {
-      wrapper.find('[data-test="search-input"]').last().props().onBlur();
+      wrapper.find('[data-test="filters-search"]').last().props().onBlur();
     });
 
     expect(mockedProps.fetchData.mock.calls[0]).toMatchInlineSnapshot(`
@@ -411,7 +415,10 @@ describe('ListView', () => {
             Object {
               "id": "id",
               "operator": "eq",
-              "value": "bar",
+              "value": Object {
+                "label": "bar",
+                "value": "bar",
+              },
             },
           ],
           "pageIndex": 0,
@@ -433,7 +440,10 @@ describe('ListView', () => {
             Object {
               "id": "id",
               "operator": "eq",
-              "value": "bar",
+              "value": Object {
+                "label": "bar",
+                "value": "bar",
+              },
             },
             Object {
               "id": "name",
@@ -462,7 +472,7 @@ describe('ListView', () => {
     });
 
     await act(async () => {
-      wrapper2.find('[data-test="card-sort-select"]').first().props().onChange({
+      wrapper2.find('[aria-label="Sort"]').first().props().onChange({
         desc: false,
         id: 'something',
         label: 'Alphabetical',

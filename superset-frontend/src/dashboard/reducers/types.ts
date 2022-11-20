@@ -18,12 +18,36 @@
  */
 
 import componentTypes from 'src/dashboard/util/componentTypes';
-import { DataMaskStateWithId } from 'src/dataMask/types';
-import { Filter } from '../components/nativeFilters/types';
+import { NativeFilterScope, JsonObject } from '@superset-ui/core';
 
 export enum Scoping {
-  all,
-  specific,
+  All = 'All',
+  Specific = 'Specific',
+}
+
+export type ChartConfiguration = {
+  [chartId: number]: {
+    id: number;
+    crossFilters: {
+      scope: NativeFilterScope;
+      chartsInScope: number[];
+    };
+  };
+};
+
+export type User = {
+  email: string;
+  firstName: string;
+  isActive: boolean;
+  lastName: string;
+  permissions: Record<string, any>;
+  roles: Record<string, any>;
+  userId: number;
+  username: string;
+};
+export interface DashboardInfo {
+  id: number;
+  json_metadata: string;
 }
 
 /** Chart state of redux */
@@ -67,21 +91,15 @@ export type LayoutItem = {
   };
 };
 
-export type FilterSet = {
-  id: string;
+export type FilterSetFullData = {
+  changed_by_fk: string | null;
+  changed_on: string | null;
+  created_by_fk: string | null;
+  created_on: string | null;
+  dashboard_id: number;
+  description: string | null;
   name: string;
-  dataMask: Partial<DataMaskStateWithId>;
-};
-
-export type FilterSets = {
-  [filtersSetId: string]: FilterSet;
-};
-
-export type Filters = {
-  [filterId: string]: Filter;
-};
-
-export type NativeFiltersState = {
-  filters: Filters;
-  filterSets: FilterSets;
+  owner_id: number;
+  owner_type: string;
+  params: JsonObject;
 };

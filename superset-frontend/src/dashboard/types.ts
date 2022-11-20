@@ -16,9 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { ChartProps } from '@superset-ui/core';
-import { chart } from 'src/chart/chartReducer';
+import {
+  ChartProps,
+  DataMaskStateWithId,
+  ExtraFormData,
+  GenericDataType,
+  JsonObject,
+  NativeFiltersState,
+} from '@superset-ui/core';
+import { Dataset } from '@superset-ui/chart-controls';
+import { chart } from 'src/components/Chart/chartReducer';
 import componentTypes from 'src/dashboard/util/componentTypes';
+import { UrlParamEntries } from 'src/utils/urlUtils';
+
+import { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
+import { ChartState } from '../explore/types';
+
+export { Dashboard } from 'src/types/Dashboard';
 
 export type ChartReducerInitialState = typeof chart;
 
@@ -26,24 +40,101 @@ export type ChartReducerInitialState = typeof chart;
 // Ref: https://github.com/apache/superset/blob/dcac860f3e5528ecbc39e58f045c7388adb5c3d0/superset-frontend/src/dashboard/reducers/getInitialState.js#L120
 export interface ChartQueryPayload extends Partial<ChartReducerInitialState> {
   id: number;
-  formData: ChartProps['formData'];
   form_data?: ChartProps['rawFormData'];
   [key: string]: unknown;
 }
 
 /** Chart state of redux */
-export type Chart = {
-  id: number;
-  formData: {
+export type Chart = ChartState & {
+  form_data: {
     viz_type: string;
+    datasource: string;
   };
+};
+
+export enum FilterBarOrientation {
+  VERTICAL = 'VERTICAL',
+  HORIZONTAL = 'HORIZONTAL',
+}
+
+export type ActiveTabs = string[];
+export type DashboardLayout = { [key: string]: LayoutItem };
+export type DashboardLayoutState = { present: DashboardLayout };
+export type DashboardState = {
+  preselectNativeFilters?: JsonObject;
+  editMode: boolean;
+  isPublished: boolean;
+  directPathToChild: string[];
+  activeTabs: ActiveTabs;
+  fullSizeChartId: number | null;
+  isRefreshing: boolean;
+  isFiltersRefreshing: boolean;
+  hasUnsavedChanges: boolean;
+  colorScheme: string;
+  sliceIds: number[];
+  directPathLastUpdated: number;
+  focusedFilterField?: {
+    chartId: number;
+    column: string;
+  };
+  overwriteConfirmMetadata?: {
+    updatedAt: string;
+    updatedBy: string;
+    overwriteConfirmItems: {
+      keyPath: string;
+      oldValue: string;
+      newValue: string;
+    }[];
+    dashboardId: number;
+    data: JsonObject;
+  };
+};
+export type DashboardInfo = {
+  id: number;
+  common: {
+    flash_messages: string[];
+    conf: JsonObject;
+  };
+  userId: string;
+  dash_edit_perm: boolean;
+  json_metadata: string;
+  metadata: {
+    native_filter_configuration: JsonObject;
+    show_native_filters: boolean;
+    chart_configuration: JsonObject;
+    color_scheme: string;
+    color_namespace: string;
+    color_scheme_domain: string[];
+    label_colors: JsonObject;
+    shared_label_colors: JsonObject;
+  };
+  filterBarOrientation: FilterBarOrientation;
+};
+
+export type ChartsState = { [key: string]: Chart };
+
+export type Datasource = Dataset & {
+  uid: string;
+  column_types: GenericDataType[];
+  table_name: string;
+};
+export type DatasourcesState = {
+  [key: string]: Datasource;
 };
 
 /** Root state of redux */
 export type RootState = {
-  charts: { [key: string]: Chart };
-  dashboardLayout: { present: { [key: string]: LayoutItem } };
+  datasources: DatasourcesState;
+  sliceEntities: JsonObject;
+  charts: ChartsState;
+  dashboardLayout: DashboardLayoutState;
   dashboardFilters: {};
+  dashboardState: DashboardState;
+  dashboardInfo: DashboardInfo;
+  dataMask: DataMaskStateWithId;
+  impressionId: string;
+  nativeFilters: NativeFiltersState;
+  user: UserWithPermissionsAndRoles;
 };
 
 /** State of dashboardLayout in redux */
@@ -63,8 +154,11 @@ export type LayoutItem = {
   id: string;
   meta: {
     chartId: number;
+    defaultText?: string;
     height: number;
+    placeholder?: string;
     sliceName?: string;
+    sliceNameOverride?: string;
     text?: string;
     uuid: string;
     width: number;
@@ -73,9 +167,27 @@ export type LayoutItem = {
 
 type ActiveFilter = {
   scope: number[];
-  values: any[];
+  values: ExtraFormData;
 };
 
 export type ActiveFilters = {
   [key: string]: ActiveFilter;
+};
+
+export interface DashboardPermalinkState {
+  dataMask: DataMaskStateWithId;
+  activeTabs: string[];
+  anchor: string;
+  urlParams?: UrlParamEntries;
+}
+
+export interface DashboardPermalinkValue {
+  dashboardId: string;
+  state: DashboardPermalinkState;
+}
+
+export type EmbeddedDashboard = {
+  uuid: string;
+  dashboard_id: string;
+  allowed_domains: string[];
 };

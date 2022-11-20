@@ -14,9 +14,9 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
-from sqlalchemy.sql.expression import ColumnClause, ColumnElement
+from sqlalchemy.sql.expression import ColumnClause
 
 from superset.db_engine_specs.base import BaseEngineSpec, TimestampExpression
 
@@ -26,17 +26,22 @@ class PinotEngineSpec(BaseEngineSpec):  # pylint: disable=abstract-method
     engine_name = "Apache Pinot"
     allows_subqueries = False
     allows_joins = False
-    allows_column_aliases = False
+    allows_alias_in_select = False
+    allows_alias_in_orderby = False
 
     # Pinot does its own conversion below
     _time_grain_expressions: Dict[Optional[str], str] = {
         "PT1S": "1:SECONDS",
         "PT1M": "1:MINUTES",
+        "PT5M": "5:MINUTES",
+        "PT10M": "10:MINUTES",
+        "PT15M": "15:MINUTES",
+        "PT30M": "30:MINUTES",
         "PT1H": "1:HOURS",
         "P1D": "1:DAYS",
         "P1W": "week",
         "P1M": "month",
-        "P0.25Y": "quarter",
+        "P3MY": "quarter",
         "P1Y": "year",
     }
 
@@ -52,11 +57,15 @@ class PinotEngineSpec(BaseEngineSpec):  # pylint: disable=abstract-method
     _use_date_trunc_function: Dict[str, bool] = {
         "PT1S": False,
         "PT1M": False,
+        "PT5M": False,
+        "PT10M": False,
+        "PT15M": False,
+        "PT30M": False,
         "PT1H": False,
         "P1D": False,
         "P1W": True,
         "P1M": True,
-        "P0.25Y": True,
+        "P3M": True,
         "P1Y": True,
     }
 
@@ -66,7 +75,6 @@ class PinotEngineSpec(BaseEngineSpec):  # pylint: disable=abstract-method
         col: ColumnClause,
         pdf: Optional[str],
         time_grain: Optional[str],
-        type_: Optional[str] = None,
     ) -> TimestampExpression:
         if not pdf:
             raise NotImplementedError(f"Empty date format for '{col}'")
@@ -111,9 +119,3 @@ class PinotEngineSpec(BaseEngineSpec):  # pylint: disable=abstract-method
             time_expr = f"DATETIMECONVERT({{col}}, '{tf}', '{tf}', '{granularity}')"
 
         return TimestampExpression(time_expr, col)
-
-    @classmethod
-    def make_select_compatible(
-        cls, groupby_exprs: Dict[str, ColumnElement], select_exprs: List[ColumnElement]
-    ) -> List[ColumnElement]:
-        return select_exprs

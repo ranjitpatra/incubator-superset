@@ -14,19 +14,26 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import json
 import logging
 from datetime import datetime
 from io import BytesIO
 from typing import Any
-from zipfile import ZipFile
+from zipfile import is_zipfile, ZipFile
 
-from flask import g, Response, send_file
+from flask import g, request, Response, send_file
 from flask_appbuilder.api import expose, protect, rison, safe
 from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_babel import ngettext
 
+from superset.commands.importers.exceptions import (
+    IncorrectFormatError,
+    NoValidFilesFoundError,
+)
+from superset.commands.importers.v1.utils import get_contents_from_bundle
 from superset.constants import MODEL_API_RW_METHOD_PERMISSION_MAP, RouteMethod
 from superset.databases.filters import DatabaseFilter
+from superset.extensions import event_logger
 from superset.models.sql_lab import SavedQuery
 from superset.queries.saved_queries.commands.bulk_delete import (
     BulkDeleteSavedQueryCommand,
@@ -36,6 +43,9 @@ from superset.queries.saved_queries.commands.exceptions import (
     SavedQueryNotFoundError,
 )
 from superset.queries.saved_queries.commands.export import ExportSavedQueriesCommand
+from superset.queries.saved_queries.commands.importers.dispatcher import (
+    ImportSavedQueriesCommand,
+)
 from superset.queries.saved_queries.filters import (
     SavedQueryAllTextFilter,
     SavedQueryFavoriteFilter,
@@ -46,7 +56,11 @@ from superset.queries.saved_queries.schemas import (
     get_export_ids_schema,
     openapi_spec_methods_override,
 )
-from superset.views.base_api import BaseSupersetModelRestApi, statsd_metrics
+from superset.views.base_api import (
+    BaseSupersetModelRestApi,
+    requires_form_data,
+    statsd_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +72,7 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
         RouteMethod.EXPORT,
         RouteMethod.RELATED,
         RouteMethod.DISTINCT,
+        RouteMethod.IMPORT,
         "bulk_delete",  # not using RouteMethod since locally defined
     }
     class_permission_name = "SavedQuery"
@@ -69,6 +84,7 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
     base_filters = [["id", SavedQueryFilter, lambda: []]]
 
     show_columns = [
+        "changed_on_delta_humanized",
         "created_by.first_name",
         "created_by.id",
         "created_by.last_name",
@@ -80,6 +96,7 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
         "schema",
         "sql",
         "sql_tables",
+        "template_parameters",
     ]
     list_columns = [
         "changed_on_delta_humanized",
@@ -98,8 +115,16 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
         "sql_tables",
         "rows",
         "last_run_delta_humanized",
+        "extra",
     ]
-    add_columns = ["db_id", "description", "label", "schema", "sql"]
+    add_columns = [
+        "db_id",
+        "description",
+        "label",
+        "schema",
+        "sql",
+        "template_parameters",
+    ]
     edit_columns = add_columns
     order_columns = [
         "schema",
@@ -179,7 +204,7 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
         """
         item_ids = kwargs["rison"]
         try:
-            BulkDeleteSavedQueryCommand(g.user, item_ids).run()
+            BulkDeleteSavedQueryCommand(item_ids).run()
             return self.response(
                 200,
                 message=ngettext(
@@ -228,6 +253,7 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
             500:
               $ref: '#/components/responses/500'
         """
+        token = request.args.get("token")
         requested_ids = kwargs["rison"]
         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
         root = f"saved_query_export_{timestamp}"
@@ -245,9 +271,89 @@ class SavedQueryRestApi(BaseSupersetModelRestApi):
                 return self.response_404()
         buf.seek(0)
 
-        return send_file(
+        response = send_file(
             buf,
             mimetype="application/zip",
             as_attachment=True,
             attachment_filename=filename,
         )
+        if token:
+            response.set_cookie(token, "done", max_age=600)
+        return response
+
+    @expose("/import/", methods=["POST"])
+    @protect()
+    @statsd_metrics
+    @event_logger.log_this_with_context(
+        action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.import_",
+        log_to_statsd=False,
+    )
+    @requires_form_data
+    def import_(self) -> Response:
+        """Import Saved Queries with associated databases
+        ---
+        post:
+          requestBody:
+            required: true
+            content:
+              multipart/form-data:
+                schema:
+                  type: object
+                  properties:
+                    formData:
+                      description: upload file (ZIP)
+                      type: string
+                      format: binary
+                    passwords:
+                      description: >-
+                        JSON map of passwords for each featured database in the
+                        ZIP file. If the ZIP includes a database config in the path
+                        `databases/MyDatabase.yaml`, the password should be provided
+                        in the following format:
+                        `{"databases/MyDatabase.yaml": "my_password"}`.
+                      type: string
+                    overwrite:
+                      description: overwrite existing saved queries?
+                      type: boolean
+          responses:
+            200:
+              description: Saved Query import result
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+            400:
+              $ref: '#/components/responses/400'
+            401:
+              $ref: '#/components/responses/401'
+            422:
+              $ref: '#/components/responses/422'
+            500:
+              $ref: '#/components/responses/500'
+        """
+        upload = request.files.get("formData")
+        if not upload:
+            return self.response_400()
+        if not is_zipfile(upload):
+            raise IncorrectFormatError("Not a ZIP file")
+        with ZipFile(upload) as bundle:
+            contents = get_contents_from_bundle(bundle)
+
+        if not contents:
+            raise NoValidFilesFoundError()
+
+        passwords = (
+            json.loads(request.form["passwords"])
+            if "passwords" in request.form
+            else None
+        )
+        overwrite = request.form.get("overwrite") == "true"
+
+        command = ImportSavedQueriesCommand(
+            contents, passwords=passwords, overwrite=overwrite
+        )
+        command.run()
+        return self.response(200, message="OK")

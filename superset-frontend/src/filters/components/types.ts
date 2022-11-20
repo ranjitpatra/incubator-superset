@@ -1,3 +1,5 @@
+import { SetDataMaskHook } from '@superset-ui/core';
+
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -19,4 +21,11 @@
 export interface PluginFilterStylesProps {
   height: number;
   width: number;
+}
+
+export interface PluginFilterHooks {
+  setDataMask: SetDataMaskHook;
+  setFocusedFilter: () => void;
+  unsetFocusedFilter: () => void;
+  setFilterActive: (isActive: boolean) => void;
 }

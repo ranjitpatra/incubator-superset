@@ -38,7 +38,7 @@ describe('Test explore links', () => {
     cy.visitChartByName('Growth Rate');
     cy.verifySliceSuccess({ waitAlias: '@chartData' });
 
-    cy.get('div#query').click();
+    cy.get('[aria-label="Menu actions trigger"]').click();
     cy.get('span').contains('View query').parent().click();
     cy.wait('@chartData').then(() => {
       cy.get('code');
@@ -48,23 +48,16 @@ describe('Test explore links', () => {
     });
   });
 
-  it('Test if short link is generated', () => {
-    cy.intercept('POST', 'r/shortner/').as('getShortUrl');
-
-    cy.visitChartByName('Growth Rate');
-    cy.verifySliceSuccess({ waitAlias: '@chartData' });
-
-    cy.get('[data-test=short-link-button]').click();
-
-    // explicitly wait for the url response
-    cy.wait('@getShortUrl');
-  });
-
   it('Test iframe link', () => {
     cy.visitChartByName('Growth Rate');
     cy.verifySliceSuccess({ waitAlias: '@chartData' });
 
-    cy.get('[data-test=embed-code-button]').click();
+    cy.get('[aria-label="Menu actions trigger"]').click();
+    cy.get('div[title="Share"]').trigger('mouseover');
+    // need to use [id= syntax, otherwise error gets triggered because of special character in id
+    cy.get('[id="share_submenu$Menu"]').within(() => {
+      cy.contains('Embed code').parent().click();
+    });
     cy.get('#embed-code-popover').within(() => {
       cy.get('textarea[name=embedCode]').contains('iframe');
     });
@@ -81,7 +74,7 @@ describe('Test explore links', () => {
     };
     const newChartName = `Test chart [${shortid.generate()}]`;
 
-    cy.visitChartByParams(JSON.stringify(formData));
+    cy.visitChartByParams(formData);
     cy.verifySliceSuccess({ waitAlias: '@tableChartData' });
     cy.url().then(() => {
       cy.get('[data-test="query-save-button"]').click();
@@ -108,8 +101,8 @@ describe('Test explore links', () => {
 
       cy.request(apiURL('/api/v1/chart/', query)).then(response => {
         expect(response.body.count).equals(1);
-        cy.request('DELETE', `/api/v1/chart/${response.body.ids[0]}`);
       });
+      cy.deleteChartByName(newChartName, true);
     });
   });
 
@@ -126,8 +119,12 @@ describe('Test explore links', () => {
     cy.get('[data-test="new-chart-name"]').click().clear().type(newChartName);
     // Add a new option using the "CreatableSelect" feature
     cy.get('[data-test="save-chart-modal-select-dashboard-form"]')
-      .find('#dashboard-creatable-select')
-      .type(`${dashboardTitle}{enter}{enter}`);
+      .find('input[aria-label="Select a dashboard"]')
+      .type(`${dashboardTitle}`, { force: true });
+
+    cy.get(`.ant-select-item[label="${dashboardTitle}"]`).click({
+      force: true,
+    });
 
     cy.get('[data-test="btn-modal-save"]').click();
     cy.verifySliceSuccess({ waitAlias: '@chartData' });
@@ -153,8 +150,12 @@ describe('Test explore links', () => {
     // This time around, typing the same dashboard name
     // will select the existing one
     cy.get('[data-test="save-chart-modal-select-dashboard-form"]')
-      .find('#dashboard-creatable-select')
-      .type(`${dashboardTitle}{enter}{enter}`);
+      .find('input[aria-label="Select a dashboard"]')
+      .type(`${dashboardTitle}{enter}`, { force: true });
+
+    cy.get(`.ant-select-item[label="${dashboardTitle}"]`).click({
+      force: true,
+    });
 
     cy.get('[data-test="btn-modal-save"]').click();
     cy.verifySliceSuccess({ waitAlias: '@chartData' });
@@ -182,5 +183,6 @@ describe('Test explore links', () => {
     cy.request(apiURL('/api/v1/dashboard/', query)).then(response => {
       expect(response.body.count).equals(1);
     });
+    cy.deleteDashboardByName(dashboardTitle, true);
   });
 });

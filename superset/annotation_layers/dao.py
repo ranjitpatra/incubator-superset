@@ -41,10 +41,9 @@ class AnnotationLayerDAO(BaseDAO):
             ).delete(synchronize_session="fetch")
             if commit:
                 db.session.commit()
-        except SQLAlchemyError:
-            if commit:
-                db.session.rollback()
-            raise DAODeleteFailedError()
+        except SQLAlchemyError as ex:
+            db.session.rollback()
+            raise DAODeleteFailedError() from ex
 
     @staticmethod
     def has_annotations(model_id: Union[int, List[int]]) -> bool:

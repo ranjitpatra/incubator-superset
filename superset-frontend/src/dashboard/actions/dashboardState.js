@@ -18,29 +18,50 @@
  */
 /* eslint camelcase: 0 */
 import { ActionCreators as UndoActionCreators } from 'redux-undo';
-import { t, SupersetClient } from '@superset-ui/core';
-
-import { addChart, removeChart, refreshChart } from '../../chart/chartAction';
-import { chart as initChart } from '../../chart/chartReducer';
+import {
+  ensureIsArray,
+  t,
+  SupersetClient,
+  getSharedLabelColor,
+} from '@superset-ui/core';
+import {
+  addChart,
+  removeChart,
+  refreshChart,
+} from 'src/components/Chart/chartAction';
+import { chart as initChart } from 'src/components/Chart/chartReducer';
+import { applyDefaultFormData } from 'src/explore/store';
+import { getClientErrorObject } from 'src/utils/getClientErrorObject';
+import {
+  SAVE_TYPE_OVERWRITE,
+  SAVE_TYPE_OVERWRITE_CONFIRMED,
+} from 'src/dashboard/util/constants';
+import {
+  addSuccessToast,
+  addWarningToast,
+  addDangerToast,
+} from 'src/components/MessageToasts/actions';
+import serializeActiveFilterValues from 'src/dashboard/util/serializeActiveFilterValues';
+import serializeFilterScopes from 'src/dashboard/util/serializeFilterScopes';
+import { getActiveFilters } from 'src/dashboard/util/activeDashboardFilters';
+import { safeStringify } from 'src/utils/safeStringify';
+import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
+import { logEvent } from 'src/logger/actions';
+import { LOG_ACTIONS_CONFIRM_OVERWRITE_DASHBOARD_METADATA } from 'src/logger/LogUtils';
+import { UPDATE_COMPONENTS_PARENTS_LIST } from './dashboardLayout';
+import {
+  setChartConfiguration,
+  dashboardInfoChanged,
+  SET_CHART_CONFIG_COMPLETE,
+} from './dashboardInfo';
 import { fetchDatasourceMetadata } from './datasources';
 import {
   addFilter,
   removeFilter,
   updateDirectPathToFilter,
 } from './dashboardFilters';
-import { applyDefaultFormData } from '../../explore/store';
-import { getClientErrorObject } from '../../utils/getClientErrorObject';
-import { SAVE_TYPE_OVERWRITE } from '../util/constants';
-import {
-  addSuccessToast,
-  addWarningToast,
-  addDangerToast,
-} from '../../messageToasts/actions';
-import { UPDATE_COMPONENTS_PARENTS_LIST } from './dashboardLayout';
-import serializeActiveFilterValues from '../util/serializeActiveFilterValues';
-import serializeFilterScopes from '../util/serializeFilterScopes';
-import { getActiveFilters } from '../util/activeDashboardFilters';
-import { safeStringify } from '../../utils/safeStringify';
+import { SET_FILTER_CONFIG_COMPLETE } from './nativeFilters';
+import getOverwriteItems from '../util/getOverwriteItems';
 
 export const SET_UNSAVED_CHANGES = 'SET_UNSAVED_CHANGES';
 export function setUnsavedChanges(hasUnsavedChanges) {
@@ -117,8 +138,13 @@ export function savePublished(id, isPublished) {
       }),
     })
       .then(() => {
-        const nowPublished = isPublished ? 'published' : 'hidden';
-        dispatch(addSuccessToast(t(`This dashboard is now ${nowPublished}`)));
+        dispatch(
+          addSuccessToast(
+            isPublished
+              ? t('This dashboard is now published')
+              : t('This dashboard is now hidden'),
+          ),
+        );
         dispatch(togglePublished(isPublished));
       })
       .catch(() => {
@@ -169,9 +195,15 @@ export function saveDashboardRequestSuccess(lastModifiedTime) {
   };
 }
 
-export function saveDashboardRequest(data, id, saveType) {
-  const path = saveType === SAVE_TYPE_OVERWRITE ? 'save_dash' : 'copy_dash';
+export const SET_OVERRIDE_CONFIRM = 'SET_OVERRIDE_CONFIRM';
+export function setOverrideConfirm(overwriteConfirmMetadata) {
+  return {
+    type: SET_OVERRIDE_CONFIRM,
+    overwriteConfirmMetadata,
+  };
+}
 
+export function saveDashboardRequest(data, id, saveType) {
   return (dispatch, getState) => {
     dispatch({ type: UPDATE_COMPONENTS_PARENTS_LIST });
 
@@ -180,7 +212,7 @@ export function saveDashboardRequest(data, id, saveType) {
     Object.values(dashboardFilters).forEach(filter => {
       const { chartId } = filter;
       const componentId = filter.directPathToFilter.slice().pop();
-      const directPathToFilter = (layout[componentId].parents || []).slice();
+      const directPathToFilter = (layout[componentId]?.parents || []).slice();
       directPathToFilter.push(componentId);
       dispatch(updateDirectPathToFilter(chartId, directPathToFilter));
     });
@@ -188,32 +220,238 @@ export function saveDashboardRequest(data, id, saveType) {
     const serializedFilters = serializeActiveFilterValues(getActiveFilters());
     // serialize filter scope for each filter field, grouped by filter id
     const serializedFilterScopes = serializeFilterScopes(dashboardFilters);
+    const {
+      certified_by,
+      certification_details,
+      css,
+      dashboard_title,
+      owners,
+      roles,
+      slug,
+    } = data;
+
+    const hasId = item => item.id !== undefined;
+
+    // making sure the data is what the backend expects
+    const cleanedData = {
+      ...data,
+      certified_by: certified_by || '',
+      certification_details:
+        certified_by && certification_details ? certification_details : '',
+      css: css || '',
+      dashboard_title: dashboard_title || t('[ untitled dashboard ]'),
+      owners: ensureIsArray(owners).map(o => (hasId(o) ? o.id : o)),
+      roles: !isFeatureEnabled(FeatureFlag.DASHBOARD_RBAC)
+        ? undefined
+        : ensureIsArray(roles).map(r => (hasId(r) ? r.id : r)),
+      slug: slug || null,
+      metadata: {
+        ...data.metadata,
+        color_namespace: data.metadata?.color_namespace || undefined,
+        color_scheme: data.metadata?.color_scheme || '',
+        color_scheme_domain: data.metadata?.color_scheme_domain || [],
+        expanded_slices: data.metadata?.expanded_slices || {},
+        label_colors: data.metadata?.label_colors || {},
+        shared_label_colors: data.metadata?.shared_label_colors || {},
+        refresh_frequency: data.metadata?.refresh_frequency || 0,
+        timed_refresh_immune_slices:
+          data.metadata?.timed_refresh_immune_slices || [],
+      },
+    };
+
+    const handleChartConfiguration = () => {
+      const {
+        dashboardInfo: {
+          metadata: { chart_configuration = {} },
+        },
+      } = getState();
+      const chartConfiguration = Object.values(chart_configuration).reduce(
+        (prev, next) => {
+          // If chart removed from dashboard - remove it from metadata
+          if (
+            Object.values(layout).find(
+              layoutItem => layoutItem?.meta?.chartId === next.id,
+            )
+          ) {
+            return { ...prev, [next.id]: next };
+          }
+          return prev;
+        },
+        {},
+      );
+      return chartConfiguration;
+    };
+
+    const onCopySuccess = response => {
+      const lastModifiedTime = response.json.last_modified_time;
+      if (lastModifiedTime) {
+        dispatch(saveDashboardRequestSuccess(lastModifiedTime));
+      }
+      if (isFeatureEnabled(FeatureFlag.DASHBOARD_CROSS_FILTERS)) {
+        const chartConfiguration = handleChartConfiguration();
+        dispatch(setChartConfiguration(chartConfiguration));
+      }
+      dispatch(addSuccessToast(t('This dashboard was saved successfully.')));
+      return response;
+    };
+
+    const onUpdateSuccess = response => {
+      const updatedDashboard = response.json.result;
+      const lastModifiedTime = response.json.last_modified_time;
+      // syncing with the backend transformations of the metadata
+      if (updatedDashboard.json_metadata) {
+        const metadata = JSON.parse(updatedDashboard.json_metadata);
+        dispatch(
+          dashboardInfoChanged({
+            metadata,
+          }),
+        );
+        if (metadata.chart_configuration) {
+          dispatch({
+            type: SET_CHART_CONFIG_COMPLETE,
+            chartConfiguration: metadata.chart_configuration,
+          });
+        }
+        if (metadata.native_filter_configuration) {
+          dispatch({
+            type: SET_FILTER_CONFIG_COMPLETE,
+            filterConfig: metadata.native_filter_configuration,
+          });
+        }
+      }
+      if (lastModifiedTime) {
+        dispatch(saveDashboardRequestSuccess(lastModifiedTime));
+      }
+      // redirect to the new slug or id
+      window.history.pushState(
+        { event: 'dashboard_properties_changed' },
+        '',
+        `/superset/dashboard/${slug || id}/`,
+      );
+
+      dispatch(addSuccessToast(t('This dashboard was saved successfully.')));
+      dispatch(setOverrideConfirm(undefined));
+      return response;
+    };
+
+    const onError = async response => {
+      const { error, message } = await getClientErrorObject(response);
+      let errorText = t('Sorry, an unknown error occurred');
+
+      if (error) {
+        errorText = t(
+          'Sorry, there was an error saving this dashboard: %s',
+          error,
+        );
+      }
+      if (typeof message === 'string' && message === 'Forbidden') {
+        errorText = t('You do not have permission to edit this dashboard');
+      }
+      dispatch(addDangerToast(errorText));
+    };
+
+    if (
+      [SAVE_TYPE_OVERWRITE, SAVE_TYPE_OVERWRITE_CONFIRMED].includes(saveType)
+    ) {
+      let chartConfiguration = {};
+      if (isFeatureEnabled(FeatureFlag.DASHBOARD_CROSS_FILTERS)) {
+        chartConfiguration = handleChartConfiguration();
+      }
+      const updatedDashboard =
+        saveType === SAVE_TYPE_OVERWRITE_CONFIRMED
+          ? data
+          : {
+              certified_by: cleanedData.certified_by,
+              certification_details: cleanedData.certification_details,
+              css: cleanedData.css,
+              dashboard_title: cleanedData.dashboard_title,
+              slug: cleanedData.slug,
+              owners: cleanedData.owners,
+              roles: cleanedData.roles,
+              json_metadata: safeStringify({
+                ...(cleanedData?.metadata || {}),
+                default_filters: safeStringify(serializedFilters),
+                filter_scopes: serializedFilterScopes,
+                chart_configuration: chartConfiguration,
+              }),
+            };
+
+      const updateDashboard = () =>
+        SupersetClient.put({
+          endpoint: `/api/v1/dashboard/${id}`,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedDashboard),
+        })
+          .then(response => onUpdateSuccess(response))
+          .catch(response => onError(response));
+      return new Promise((resolve, reject) => {
+        if (
+          !isFeatureEnabled(FeatureFlag.CONFIRM_DASHBOARD_DIFF) ||
+          saveType === SAVE_TYPE_OVERWRITE_CONFIRMED
+        ) {
+          // skip overwrite precheck
+          resolve();
+          return;
+        }
+
+        // precheck for overwrite items
+        SupersetClient.get({
+          endpoint: `/api/v1/dashboard/${id}`,
+        }).then(response => {
+          const dashboard = response.json.result;
+          const overwriteConfirmItems = getOverwriteItems(
+            dashboard,
+            updatedDashboard,
+          );
+          if (overwriteConfirmItems.length > 0) {
+            dispatch(
+              setOverrideConfirm({
+                updatedAt: dashboard.changed_on,
+                updatedBy: dashboard.changed_by_name,
+                overwriteConfirmItems,
+                dashboardId: id,
+                data: updatedDashboard,
+              }),
+            );
+            return reject(overwriteConfirmItems);
+          }
+          return resolve();
+        });
+      })
+        .then(updateDashboard)
+        .catch(overwriteConfirmItems => {
+          const errorText = t('Please confirm the overwrite values.');
+          dispatch(
+            logEvent(LOG_ACTIONS_CONFIRM_OVERWRITE_DASHBOARD_METADATA, {
+              dashboard_id: id,
+              items: overwriteConfirmItems,
+            }),
+          );
+          dispatch(addDangerToast(errorText));
+        });
+    }
+    // changing the data as the endpoint requires
+    const copyData = { ...cleanedData };
+    if (copyData.metadata) {
+      delete copyData.metadata;
+    }
+    const finalCopyData = {
+      ...copyData,
+      // the endpoint is expecting the metadata to be flat
+      ...(cleanedData?.metadata || {}),
+    };
     return SupersetClient.post({
-      endpoint: `/superset/${path}/${id}/`,
+      endpoint: `/superset/copy_dash/${id}/`,
       postPayload: {
         data: {
-          ...data,
+          ...finalCopyData,
           default_filters: safeStringify(serializedFilters),
           filter_scopes: safeStringify(serializedFilterScopes),
         },
       },
     })
-      .then(response => {
-        dispatch(saveDashboardRequestSuccess(response.json.last_modified_time));
-        dispatch(addSuccessToast(t('This dashboard was saved successfully.')));
-        return response;
-      })
-      .catch(response =>
-        getClientErrorObject(response).then(({ error }) =>
-          dispatch(
-            addDangerToast(
-              `${t(
-                'Sorry, there was an error saving this dashboard: ',
-              )} ${error}`,
-            ),
-          ),
-        ),
-      );
+      .then(response => onCopySuccess(response))
+      .catch(response => onError(response));
   };
 }
 
@@ -251,6 +489,45 @@ export function fetchCharts(
   };
 }
 
+const refreshCharts = (chartList, force, interval, dashboardId, dispatch) =>
+  new Promise(resolve => {
+    dispatch(fetchCharts(chartList, force, interval, dashboardId));
+    resolve();
+  });
+
+export const ON_FILTERS_REFRESH = 'ON_FILTERS_REFRESH';
+export function onFiltersRefresh() {
+  return { type: ON_FILTERS_REFRESH };
+}
+
+export const ON_FILTERS_REFRESH_SUCCESS = 'ON_FILTERS_REFRESH_SUCCESS';
+export function onFiltersRefreshSuccess() {
+  return { type: ON_FILTERS_REFRESH_SUCCESS };
+}
+
+export const ON_REFRESH_SUCCESS = 'ON_REFRESH_SUCCESS';
+export function onRefreshSuccess() {
+  return { type: ON_REFRESH_SUCCESS };
+}
+
+export const ON_REFRESH = 'ON_REFRESH';
+export function onRefresh(
+  chartList = [],
+  force = false,
+  interval = 0,
+  dashboardId,
+) {
+  return dispatch => {
+    dispatch({ type: ON_REFRESH });
+    refreshCharts(chartList, force, interval, dashboardId, dispatch).then(
+      () => {
+        dispatch(onRefreshSuccess());
+        dispatch(onFiltersRefresh());
+      },
+    );
+  };
+}
+
 export const SHOW_BUILDER_PANE = 'SHOW_BUILDER_PANE';
 export function showBuilderPane() {
   return { type: SHOW_BUILDER_PANE };
@@ -274,8 +551,7 @@ export function addSliceToDashboard(id, component) {
     const newChart = {
       ...initChart,
       id,
-      form_data,
-      formData: applyDefaultFormData(form_data),
+      form_data: applyDefaultFormData(form_data),
     };
 
     return Promise.all([
@@ -300,6 +576,7 @@ export function removeSliceFromDashboard(id) {
 
     dispatch(removeSlice(id));
     dispatch(removeChart(id));
+    getSharedLabelColor().removeSlice(id);
   };
 }
 
@@ -320,6 +597,11 @@ export function setDirectPathToChild(path) {
   return { type: SET_DIRECT_PATH, path };
 }
 
+export const SET_ACTIVE_TABS = 'SET_ACTIVE_TABS';
+export function setActiveTabs(tabId, prevTabId) {
+  return { type: SET_ACTIVE_TABS, tabId, prevTabId };
+}
+
 export const SET_FOCUSED_FILTER_FIELD = 'SET_FOCUSED_FILTER_FIELD';
 export function setFocusedFilterField(chartId, column) {
   return { type: SET_FOCUSED_FILTER_FIELD, chartId, column };
@@ -328,6 +610,11 @@ export function setFocusedFilterField(chartId, column) {
 export const UNSET_FOCUSED_FILTER_FIELD = 'UNSET_FOCUSED_FILTER_FIELD';
 export function unsetFocusedFilterField(chartId, column) {
   return { type: UNSET_FOCUSED_FILTER_FIELD, chartId, column };
+}
+
+export const SET_FULL_SIZE_CHART_ID = 'SET_FULL_SIZE_CHART_ID';
+export function setFullSizeChartId(chartId) {
+  return { type: SET_FULL_SIZE_CHART_ID, chartId };
 }
 
 // Undo history ---------------------------------------------------------------
@@ -349,5 +636,13 @@ export function maxUndoHistoryToast() {
         `You have used all ${historyLength} undo slots and will not be able to fully undo subsequent actions. You may save your current state to reset the history.`,
       ),
     );
+  };
+}
+
+export const SET_DATASETS_STATUS = 'SET_DATASETS_STATUS';
+export function setDatasetsStatus(status) {
+  return {
+    type: SET_DATASETS_STATUS,
+    status,
   };
 }

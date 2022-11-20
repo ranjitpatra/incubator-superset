@@ -17,35 +17,27 @@
  * under the License.
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import rison from 'rison';
-import {
-  SupersetClient,
-  styled,
-  supersetTheme,
-  t,
-  TimeRangeEndpoints,
-} from '@superset-ui/core';
-import {
-  buildTimeRangeString,
-  formatTimeRange,
-} from 'src/explore/dateFilterUtils';
-import { getClientErrorObject } from 'src/utils/getClientErrorObject';
+import { css, styled, t, useTheme, NO_TIME_RANGE } from '@superset-ui/core';
 import Button from 'src/components/Button';
 import ControlHeader from 'src/explore/components/ControlHeader';
 import Label from 'src/components/Label';
-import Popover from 'src/common/components/Popover';
-import { Divider } from 'src/common/components';
-import Icon from 'src/components/Icon';
-import { Select } from 'src/components/Select';
-import { Tooltip } from 'src/common/components/Tooltip';
-import { DEFAULT_TIME_RANGE } from 'src/explore/constants';
+import Modal from 'src/components/Modal';
+import { Divider } from 'src/components';
+import Icons from 'src/components/Icons';
+import Select from 'src/components/Select/Select';
+import { Tooltip } from 'src/components/Tooltip';
+import { useDebouncedEffect } from 'src/explore/exploreUtils';
+import { SLOW_DEBOUNCE } from 'src/constants';
+import { noOp } from 'src/utils/common';
+import ControlPopover from '../ControlPopover/ControlPopover';
 
-import { SelectOptionType, FrameType } from './types';
+import { DateFilterControlProps, FrameType } from './types';
 import {
-  COMMON_RANGE_VALUES_SET,
-  CALENDAR_RANGE_VALUES_SET,
+  DATE_FILTER_TEST_KEY,
+  fetchTimeRange,
   FRAME_OPTIONS,
-  customTimeRangeDecode,
+  guessFrame,
+  useDefaultTimeFilter,
 } from './utils';
 import {
   CommonFrame,
@@ -54,108 +46,69 @@ import {
   AdvancedFrame,
 } from './components';
 
-const guessFrame = (timeRange: string): FrameType => {
-  if (COMMON_RANGE_VALUES_SET.has(timeRange)) {
-    return 'Common';
-  }
-  if (CALENDAR_RANGE_VALUES_SET.has(timeRange)) {
-    return 'Calendar';
-  }
-  if (timeRange === 'No filter') {
-    return 'No filter';
-  }
-  if (customTimeRangeDecode(timeRange).matchedFlag) {
-    return 'Custom';
-  }
-  return 'Advanced';
-};
-
-const fetchTimeRange = async (
-  timeRange: string,
-  endpoints?: TimeRangeEndpoints,
-) => {
-  const query = rison.encode(timeRange);
-  const endpoint = `/api/v1/time_range/?q=${query}`;
-  try {
-    const response = await SupersetClient.get({ endpoint });
-    const timeRangeString = buildTimeRangeString(
-      response?.json?.result?.since || '',
-      response?.json?.result?.until || '',
-    );
-    return {
-      value: formatTimeRange(timeRangeString, endpoints),
-    };
-  } catch (response) {
-    const clientError = await getClientErrorObject(response);
-    return {
-      error: clientError.message || clientError.error,
-    };
-  }
-};
-
-const StyledPopover = styled(Popover)``;
+const StyledRangeType = styled(Select)`
+  width: 272px;
+`;
 
 const ContentStyleWrapper = styled.div`
-  .ant-row {
-    margin-top: 8px;
-  }
+  ${({ theme }) => css`
+    .ant-row {
+      margin-top: 8px;
+    }
 
-  .ant-input-number {
-    width: 100%;
-  }
+    .ant-input-number {
+      width: 100%;
+    }
 
-  .frame-dropdown {
-    width: 272px;
-  }
+    .ant-picker {
+      padding: 4px 17px 4px;
+      border-radius: 4px;
+      width: 100%;
+    }
 
-  .ant-picker {
-    padding: 4px 17px 4px;
-    border-radius: 4px;
-    width: 100%;
-  }
+    .ant-divider-horizontal {
+      margin: 16px 0;
+    }
 
-  .ant-divider-horizontal {
-    margin: 16px 0;
-  }
+    .control-label {
+      font-size: 11px;
+      font-weight: ${theme.typography.weights.medium};
+      color: ${theme.colors.grayscale.light2};
+      line-height: 16px;
+      text-transform: uppercase;
+      margin: 8px 0;
+    }
 
-  .control-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: #b2b2b2;
-    line-height: 16px;
-    text-transform: uppercase;
-    margin: 8px 0;
-  }
+    .vertical-radio {
+      display: block;
+      height: 40px;
+      line-height: 40px;
+    }
 
-  .vertical-radio {
-    display: block;
-    height: 40px;
-    line-height: 40px;
-  }
+    .section-title {
+      font-style: normal;
+      font-weight: ${theme.typography.weights.bold};
+      font-size: 15px;
+      line-height: 24px;
+      margin-bottom: 8px;
+    }
 
-  .section-title {
-    font-style: normal;
-    font-weight: 500;
-    font-size: 15px;
-    line-height: 24px;
-    margin-bottom: 8px;
-  }
+    .control-anchor-to {
+      margin-top: 16px;
+    }
 
-  .control-anchor-to {
-    margin-top: 16px;
-  }
+    .control-anchor-to-datetime {
+      width: 217px;
+    }
 
-  .control-anchor-to-datetime {
-    width: 217px;
-  }
-
-  .footer {
-    text-align: right;
-  }
+    .footer {
+      text-align: right;
+    }
+  `}
 `;
 
 const IconWrapper = styled.span`
-  svg {
+  span {
     margin-right: ${({ theme }) => 2 * theme.gridUnit}px;
     vertical-align: middle;
   }
@@ -167,27 +120,36 @@ const IconWrapper = styled.span`
   }
 `;
 
-interface DateFilterControlProps {
-  name: string;
-  onChange: (timeRange: string) => void;
-  value?: string;
-  endpoints?: TimeRangeEndpoints;
-}
-
 export default function DateFilterLabel(props: DateFilterControlProps) {
-  const { value = DEFAULT_TIME_RANGE, endpoints, onChange } = props;
+  const {
+    onChange,
+    onOpenPopover = noOp,
+    onClosePopover = noOp,
+    overlayStyle = 'Popover',
+  } = props;
+  const defaultTimeFilter = useDefaultTimeFilter();
+
+  const value = props.value ?? defaultTimeFilter;
   const [actualTimeRange, setActualTimeRange] = useState<string>(value);
 
   const [show, setShow] = useState<boolean>(false);
   const guessedFrame = useMemo(() => guessFrame(value), [value]);
   const [frame, setFrame] = useState<FrameType>(guessedFrame);
+  const [lastFetchedTimeRange, setLastFetchedTimeRange] = useState(value);
   const [timeRangeValue, setTimeRangeValue] = useState(value);
   const [validTimeRange, setValidTimeRange] = useState<boolean>(false);
   const [evalResponse, setEvalResponse] = useState<string>(value);
   const [tooltipTitle, setTooltipTitle] = useState<string>(value);
+  const theme = useTheme();
 
   useEffect(() => {
-    fetchTimeRange(value, endpoints).then(({ value: actualRange, error }) => {
+    if (value === NO_TIME_RANGE) {
+      setActualTimeRange(NO_TIME_RANGE);
+      setTooltipTitle(NO_TIME_RANGE);
+      setValidTimeRange(true);
+      return;
+    }
+    fetchTimeRange(value).then(({ value: actualRange, error }) => {
       if (error) {
         setEvalResponse(error || '');
         setValidTimeRange(false);
@@ -210,27 +172,41 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
           guessedFrame === 'No filter'
         ) {
           setActualTimeRange(value);
-          setTooltipTitle(actualRange || '');
         } else {
           setActualTimeRange(actualRange || '');
           setTooltipTitle(value || '');
         }
         setValidTimeRange(true);
       }
+      setLastFetchedTimeRange(value);
+      setEvalResponse(actualRange || value);
     });
   }, [value]);
 
-  useEffect(() => {
-    fetchTimeRange(timeRangeValue, endpoints).then(({ value, error }) => {
-      if (error) {
-        setEvalResponse(error || '');
-        setValidTimeRange(false);
-      } else {
-        setEvalResponse(value || '');
+  useDebouncedEffect(
+    () => {
+      if (timeRangeValue === NO_TIME_RANGE) {
+        setEvalResponse(NO_TIME_RANGE);
+        setLastFetchedTimeRange(NO_TIME_RANGE);
         setValidTimeRange(true);
+        return;
       }
-    });
-  }, [timeRangeValue]);
+      if (lastFetchedTimeRange !== timeRangeValue) {
+        fetchTimeRange(timeRangeValue).then(({ value: actualRange, error }) => {
+          if (error) {
+            setEvalResponse(error || '');
+            setValidTimeRange(false);
+          } else {
+            setEvalResponse(actualRange || '');
+            setValidTimeRange(true);
+          }
+          setLastFetchedTimeRange(timeRangeValue);
+        });
+      }
+    },
+    SLOW_DEBOUNCE,
+    [timeRangeValue],
+  );
 
   function onSave() {
     onChange(timeRangeValue);
@@ -249,29 +225,31 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
     setShow(false);
   }
 
-  const togglePopover = () => {
+  const toggleOverlay = () => {
     if (show) {
       onHide();
+      onClosePopover();
     } else {
-      setShow(true);
+      onOpen();
+      onOpenPopover();
     }
   };
 
-  function onChangeFrame(option: SelectOptionType) {
-    if (option.value === 'No filter') {
-      setTimeRangeValue('No filter');
+  function onChangeFrame(value: FrameType) {
+    if (value === NO_TIME_RANGE) {
+      setTimeRangeValue(NO_TIME_RANGE);
     }
-    setFrame(option.value as FrameType);
+    setFrame(value);
   }
 
-  const overlayConetent = (
+  const overlayContent = (
     <ContentStyleWrapper>
       <div className="control-label">{t('RANGE TYPE')}</div>
-      <Select
+      <StyledRangeType
+        ariaLabel={t('RANGE TYPE')}
         options={FRAME_OPTIONS}
-        value={FRAME_OPTIONS.filter(({ value }) => value === frame)}
+        value={frame}
         onChange={onChangeFrame}
-        className="frame-dropdown"
       />
       {frame !== 'No filter' && <Divider />}
       {frame === 'Common' && (
@@ -286,17 +264,16 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
       {frame === 'Custom' && (
         <CustomFrame value={timeRangeValue} onChange={setTimeRangeValue} />
       )}
-      {frame === 'No filter' && <div data-test="no-filter" />}
+      {frame === 'No filter' && (
+        <div data-test={DATE_FILTER_TEST_KEY.noFilter} />
+      )}
       <Divider />
       <div>
         <div className="section-title">{t('Actual time range')}</div>
         {validTimeRange && <div>{evalResponse}</div>}
         {!validTimeRange && (
           <IconWrapper className="warning">
-            <Icon
-              name="error-solid-small"
-              color={supersetTheme.colors.error.base}
-            />
+            <Icons.ErrorSolidSmall iconColor={theme.colors.error.base} />
             <span className="text error">{evalResponse}</span>
           </IconWrapper>
         )}
@@ -308,7 +285,7 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
           cta
           key="cancel"
           onClick={onHide}
-          data-test="cancel-button"
+          data-test={DATE_FILTER_TEST_KEY.cancelButton}
         >
           {t('CANCEL')}
         </Button>
@@ -318,6 +295,7 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
           disabled={!validTimeRange}
           key="apply"
           onClick={onSave}
+          data-test={DATE_FILTER_TEST_KEY.applyButton}
         >
           {t('APPLY')}
         </Button>
@@ -327,38 +305,61 @@ export default function DateFilterLabel(props: DateFilterControlProps) {
 
   const title = (
     <IconWrapper>
-      <Icon name="edit-alt" />
+      <Icons.EditAlt iconColor={theme.colors.grayscale.base} />
       <span className="text">{t('Edit time range')}</span>
     </IconWrapper>
   );
 
-  const overlayStyle = {
-    width: '600px',
-  };
+  const popoverContent = (
+    <ControlPopover
+      placement="right"
+      trigger="click"
+      content={overlayContent}
+      title={title}
+      defaultVisible={show}
+      visible={show}
+      onVisibleChange={toggleOverlay}
+      overlayStyle={{ width: '600px' }}
+    >
+      <Tooltip placement="top" title={tooltipTitle}>
+        <Label
+          className="pointer"
+          data-test={DATE_FILTER_TEST_KEY.popoverOverlay}
+        >
+          {actualTimeRange}
+        </Label>
+      </Tooltip>
+    </ControlPopover>
+  );
+
+  const modalContent = (
+    <>
+      <Tooltip placement="top" title={tooltipTitle}>
+        <Label
+          className="pointer"
+          onClick={toggleOverlay}
+          data-test={DATE_FILTER_TEST_KEY.modalOverlay}
+        >
+          {actualTimeRange}
+        </Label>
+      </Tooltip>
+      <Modal
+        title={title}
+        show={show}
+        onHide={toggleOverlay}
+        width="600px"
+        hideFooter
+        zIndex={Number.MAX_SAFE_INTEGER}
+      >
+        {overlayContent}
+      </Modal>
+    </>
+  );
 
   return (
     <>
       <ControlHeader {...props} />
-      <StyledPopover
-        placement="right"
-        trigger="click"
-        content={overlayConetent}
-        title={title}
-        defaultVisible={show}
-        visible={show}
-        onVisibleChange={togglePopover}
-        overlayStyle={overlayStyle}
-      >
-        <Tooltip placement="top" title={tooltipTitle}>
-          <Label
-            className="pointer"
-            data-test="time-range-trigger"
-            onClick={onOpen}
-          >
-            {actualTimeRange}
-          </Label>
-        </Tooltip>
-      </StyledPopover>
+      {overlayStyle === 'Modal' ? modalContent : popoverContent}
     </>
   );
 }

@@ -14,20 +14,74 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import hashlib
+import json
 import re
+import urllib
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Pattern, Tuple, Type, TYPE_CHECKING
 
 import pandas as pd
-from sqlalchemy import literal_column
-from sqlalchemy.sql.expression import ColumnClause
+from apispec import APISpec
+from apispec.ext.marshmallow import MarshmallowPlugin
+from flask_babel import gettext as __
+from marshmallow import fields, Schema
+from marshmallow.exceptions import ValidationError
+from sqlalchemy import column
+from sqlalchemy.engine.base import Engine
+from sqlalchemy.sql import sqltypes
+from typing_extensions import TypedDict
 
-from superset.db_engine_specs.base import BaseEngineSpec
+from superset.constants import PASSWORD_MASK
+from superset.databases.schemas import encrypted_field_properties, EncryptedString
+from superset.databases.utils import make_url_safe
+from superset.db_engine_specs.base import BaseEngineSpec, BasicPropertiesType
+from superset.db_engine_specs.exceptions import SupersetDBAPIConnectionError
+from superset.errors import SupersetError, SupersetErrorType
+from superset.sql_parse import Table
 from superset.utils import core as utils
+from superset.utils.hashing import md5_sha_from_str
 
 if TYPE_CHECKING:
     from superset.models.core import Database  # pragma: no cover
+
+
+CONNECTION_DATABASE_PERMISSIONS_REGEX = re.compile(
+    "Access Denied: Project (?P<project_name>.+?): User does not have "
+    + "bigquery.jobs.create permission in project (?P<project>.+?)"
+)
+
+TABLE_DOES_NOT_EXIST_REGEX = re.compile(
+    'Table name "(?P<table>.*?)" missing dataset while no default '
+    "dataset is set in the request"
+)
+
+COLUMN_DOES_NOT_EXIST_REGEX = re.compile(
+    r"Unrecognized name: (?P<column>.*?) at \[(?P<location>.+?)\]"
+)
+
+SCHEMA_DOES_NOT_EXIST_REGEX = re.compile(
+    r"bigquery error: 404 Not found: Dataset (?P<dataset>.*?):"
+    r"(?P<schema>.*?) was not found in location"
+)
+
+SYNTAX_ERROR_REGEX = re.compile(
+    'Syntax error: Expected end of input but got identifier "(?P<syntax_error>.+?)"'
+)
+
+ma_plugin = MarshmallowPlugin()
+
+
+class BigQueryParametersSchema(Schema):
+    credentials_info = EncryptedString(
+        required=False,
+        description="Contents of BigQuery JSON credentials.",
+    )
+    query = fields.Dict(required=False)
+
+
+class BigQueryParametersType(TypedDict):
+    credentials_info: Dict[str, Any]
+    query: Dict[str, Any]
 
 
 class BigQueryEngineSpec(BaseEngineSpec):
@@ -39,9 +93,15 @@ class BigQueryEngineSpec(BaseEngineSpec):
     engine_name = "Google BigQuery"
     max_column_name_length = 128
 
+    parameters_schema = BigQueryParametersSchema()
+    default_driver = "bigquery"
+    sqlalchemy_uri_placeholder = "bigquery://{project_id}"
+
     # BigQuery doesn't maintain context when running multiple statements in the
     # same cursor, so we need to run all statements at once
     run_multiple_statements_as_one = True
+
+    allows_hidden_cc_in_orderby = True
 
     """
     https://www.python.org/dev/peps/pep-0249/#arraysize
@@ -64,8 +124,12 @@ class BigQueryEngineSpec(BaseEngineSpec):
 
     _time_grain_expressions = {
         None: "{col}",
-        "PT1S": "{func}({col}, SECOND)",
-        "PT1M": "{func}({col}, MINUTE)",
+        "PT1S": "CAST(TIMESTAMP_SECONDS("
+        "UNIX_SECONDS(CAST({col} AS TIMESTAMP))"
+        ") AS {type})",
+        "PT1M": "CAST(TIMESTAMP_SECONDS("
+        "60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 60)"
+        ") AS {type})",
         "PT5M": "CAST(TIMESTAMP_SECONDS("
         "5*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 5*60)"
         ") AS {type})",
@@ -75,19 +139,66 @@ class BigQueryEngineSpec(BaseEngineSpec):
         "PT15M": "CAST(TIMESTAMP_SECONDS("
         "15*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 15*60)"
         ") AS {type})",
-        "PT0.5H": "CAST(TIMESTAMP_SECONDS("
+        "PT30M": "CAST(TIMESTAMP_SECONDS("
         "30*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 30*60)"
         ") AS {type})",
         "PT1H": "{func}({col}, HOUR)",
         "P1D": "{func}({col}, DAY)",
         "P1W": "{func}({col}, WEEK)",
+        "1969-12-29T00:00:00Z/P1W": "{func}({col}, ISOWEEK)",
         "P1M": "{func}({col}, MONTH)",
-        "P0.25Y": "{func}({col}, QUARTER)",
+        "P3M": "{func}({col}, QUARTER)",
         "P1Y": "{func}({col}, YEAR)",
     }
 
+    custom_errors: Dict[Pattern[str], Tuple[str, SupersetErrorType, Dict[str, Any]]] = {
+        CONNECTION_DATABASE_PERMISSIONS_REGEX: (
+            __(
+                "Unable to connect. Verify that the following roles are set "
+                'on the service account: "BigQuery Data Viewer", '
+                '"BigQuery Metadata Viewer", "BigQuery Job User" '
+                "and the following permissions are set "
+                '"bigquery.readsessions.create", '
+                '"bigquery.readsessions.getData"'
+            ),
+            SupersetErrorType.CONNECTION_DATABASE_PERMISSIONS_ERROR,
+            {},
+        ),
+        TABLE_DOES_NOT_EXIST_REGEX: (
+            __(
+                'The table "%(table)s" does not exist. '
+                "A valid table must be used to run this query.",
+            ),
+            SupersetErrorType.TABLE_DOES_NOT_EXIST_ERROR,
+            {},
+        ),
+        COLUMN_DOES_NOT_EXIST_REGEX: (
+            __('We can\'t seem to resolve column "%(column)s" at line %(location)s.'),
+            SupersetErrorType.COLUMN_DOES_NOT_EXIST_ERROR,
+            {},
+        ),
+        SCHEMA_DOES_NOT_EXIST_REGEX: (
+            __(
+                'The schema "%(schema)s" does not exist. '
+                "A valid schema must be used to run this query."
+            ),
+            SupersetErrorType.SCHEMA_DOES_NOT_EXIST_ERROR,
+            {},
+        ),
+        SYNTAX_ERROR_REGEX: (
+            __(
+                "Please check your query for syntax errors at or near "
+                '"%(syntax_error)s". Then, try running your query again.'
+            ),
+            SupersetErrorType.SYNTAX_ERROR,
+            {},
+        ),
+    }
+
     @classmethod
-    def convert_dttm(cls, target_type: str, dttm: datetime) -> Optional[str]:
+    def convert_dttm(
+        cls, target_type: str, dttm: datetime, db_extra: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
         tt = target_type.upper()
         if tt == utils.TemporalType.DATE:
             return f"CAST('{dttm.date().isoformat()}' AS DATE)"
@@ -121,7 +232,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
         :param label: Expected expression label
         :return: Conditionally mutated label
         """
-        label_hashed = "_" + hashlib.md5(label.encode("utf-8")).hexdigest()
+        label_hashed = "_" + md5_sha_from_str(label)
 
         # if label starts with number, add underscore as first character
         label_mutated = "_" + label if re.match(r"^\d", label) else label
@@ -143,7 +254,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
         :param label: expected expression label
         :return: truncated label
         """
-        return "_" + hashlib.md5(label.encode("utf-8")).hexdigest()
+        return "_" + md5_sha_from_str(label)
 
     @classmethod
     def normalize_indexes(cls, indexes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -166,7 +277,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
 
     @classmethod
     def extra_table_metadata(
-        cls, database: "Database", table_name: str, schema_name: str
+        cls, database: "Database", table_name: str, schema_name: Optional[str]
     ) -> Dict[str, Any]:
         indexes = database.get_indexes(table_name, schema_name)
         if not indexes:
@@ -187,20 +298,6 @@ class BigQueryEngineSpec(BaseEngineSpec):
         }
 
     @classmethod
-    def _get_fields(cls, cols: List[Dict[str, Any]]) -> List[ColumnClause]:
-        """
-        BigQuery dialect requires us to not use backtick in the fieldname which are
-        nested.
-        Using literal_column handles that issue.
-        https://docs.sqlalchemy.org/en/latest/core/tutorial.html#using-more-specific-text-with-table-literal-column-and-column
-        Also explicility specifying column names so we don't encounter duplicate
-        column names in the result.
-        """
-        return [
-            literal_column(c["name"]).label(c["name"].replace(".", "__")) for c in cols
-        ]
-
-    @classmethod
     def epoch_to_dttm(cls) -> str:
         return "TIMESTAMP_SECONDS({col})"
 
@@ -209,42 +306,288 @@ class BigQueryEngineSpec(BaseEngineSpec):
         return "TIMESTAMP_MILLIS({col})"
 
     @classmethod
-    def df_to_sql(cls, df: pd.DataFrame, **kwargs: Any) -> None:
+    def df_to_sql(
+        cls,
+        database: "Database",
+        table: Table,
+        df: pd.DataFrame,
+        to_sql_kwargs: Dict[str, Any],
+    ) -> None:
         """
-        Upload data from a Pandas DataFrame to BigQuery. Calls
-        `DataFrame.to_gbq()` which requires `pandas_gbq` to be installed.
+        Upload data from a Pandas DataFrame to a database.
 
-        :param df: Dataframe with data to be uploaded
-        :param kwargs: kwargs to be passed to to_gbq() method. Requires that `schema`,
-        `name` and `con` are present in kwargs. `name` and `schema` are combined
-         and passed to `to_gbq()` as `destination_table`.
+        Calls `pandas_gbq.DataFrame.to_gbq` which requires `pandas_gbq` to be installed.
+
+        Note this method does not create metadata for the table.
+
+        :param database: The database to upload the data to
+        :param table: The table to upload the data to
+        :param df: The dataframe with data to be uploaded
+        :param to_sql_kwargs: The kwargs to be passed to pandas.DataFrame.to_sql` method
         """
+
         try:
+            # pylint: disable=import-outside-toplevel
             import pandas_gbq
             from google.oauth2 import service_account
-        except ImportError:
+        except ImportError as ex:
             raise Exception(
                 "Could not import libraries `pandas_gbq` or `google.oauth2`, which are "
                 "required to be installed in your environment in order "
                 "to upload data to BigQuery"
-            )
+            ) from ex
 
-        if not ("name" in kwargs and "schema" in kwargs and "con" in kwargs):
-            raise Exception("name, schema and con need to be defined in kwargs")
+        if not table.schema:
+            raise Exception("The table schema must be defined")
 
-        gbq_kwargs = {}
-        gbq_kwargs["project_id"] = kwargs["con"].engine.url.host
-        gbq_kwargs["destination_table"] = f"{kwargs.pop('schema')}.{kwargs.pop('name')}"
+        to_gbq_kwargs = {}
+        with cls.get_engine(database) as engine:
+            to_gbq_kwargs = {
+                "destination_table": str(table),
+                "project_id": engine.url.host,
+            }
 
-        # add credentials if they are set on the SQLAlchemy Dialect:
-        creds = kwargs["con"].dialect.credentials_info
+        # Add credentials if they are set on the SQLAlchemy dialect.
+        creds = engine.dialect.credentials_info
+
         if creds:
-            credentials = service_account.Credentials.from_service_account_info(creds)
-            gbq_kwargs["credentials"] = credentials
+            to_gbq_kwargs[
+                "credentials"
+            ] = service_account.Credentials.from_service_account_info(creds)
 
-        # Only pass through supported kwargs
+        # Only pass through supported kwargs.
         supported_kwarg_keys = {"if_exists"}
+
         for key in supported_kwarg_keys:
-            if key in kwargs:
-                gbq_kwargs[key] = kwargs[key]
-        pandas_gbq.to_gbq(df, **gbq_kwargs)
+            if key in to_sql_kwargs:
+                to_gbq_kwargs[key] = to_sql_kwargs[key]
+
+        pandas_gbq.to_gbq(df, **to_gbq_kwargs)
+
+    @classmethod
+    def build_sqlalchemy_uri(
+        cls,
+        parameters: BigQueryParametersType,
+        encrypted_extra: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        query = parameters.get("query", {})
+        query_params = urllib.parse.urlencode(query)
+
+        if encrypted_extra:
+            credentials_info = encrypted_extra.get("credentials_info")
+            if isinstance(credentials_info, str):
+                credentials_info = json.loads(credentials_info)
+            project_id = credentials_info.get("project_id")
+        if not encrypted_extra:
+            raise ValidationError("Missing service credentials")
+
+        if project_id:
+            return f"{cls.default_driver}://{project_id}/?{query_params}"
+
+        raise ValidationError("Invalid service credentials")
+
+    @classmethod
+    def get_parameters_from_uri(
+        cls,
+        uri: str,
+        encrypted_extra: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        value = make_url_safe(uri)
+
+        # Building parameters from encrypted_extra and uri
+        if encrypted_extra:
+            # ``value.query`` needs to be explicitly converted into a dict (from an
+            # ``immutabledict``) so that it can be JSON serialized
+            return {**encrypted_extra, "query": dict(value.query)}
+
+        raise ValidationError("Invalid service credentials")
+
+    @classmethod
+    def mask_encrypted_extra(cls, encrypted_extra: Optional[str]) -> Optional[str]:
+        if encrypted_extra is None:
+            return encrypted_extra
+
+        try:
+            config = json.loads(encrypted_extra)
+        except (json.JSONDecodeError, TypeError):
+            return encrypted_extra
+
+        try:
+            config["credentials_info"]["private_key"] = PASSWORD_MASK
+        except KeyError:
+            pass
+
+        return json.dumps(config)
+
+    @classmethod
+    def unmask_encrypted_extra(
+        cls, old: Optional[str], new: Optional[str]
+    ) -> Optional[str]:
+        """
+        Reuse ``private_key`` if available and unchanged.
+        """
+        if old is None or new is None:
+            return new
+
+        try:
+            old_config = json.loads(old)
+            new_config = json.loads(new)
+        except (TypeError, json.JSONDecodeError):
+            return new
+
+        if "credentials_info" not in new_config:
+            return new
+
+        if "private_key" not in new_config["credentials_info"]:
+            return new
+
+        if new_config["credentials_info"]["private_key"] == PASSWORD_MASK:
+            new_config["credentials_info"]["private_key"] = old_config[
+                "credentials_info"
+            ]["private_key"]
+
+        return json.dumps(new_config)
+
+    @classmethod
+    def get_dbapi_exception_mapping(cls) -> Dict[Type[Exception], Type[Exception]]:
+        # pylint: disable=import-outside-toplevel
+        from google.auth.exceptions import DefaultCredentialsError
+
+        return {DefaultCredentialsError: SupersetDBAPIConnectionError}
+
+    @classmethod
+    def validate_parameters(
+        cls,
+        properties: BasicPropertiesType,  # pylint: disable=unused-argument
+    ) -> List[SupersetError]:
+        return []
+
+    @classmethod
+    def parameters_json_schema(cls) -> Any:
+        """
+        Return configuration parameters as OpenAPI.
+        """
+        if not cls.parameters_schema:
+            return None
+
+        spec = APISpec(
+            title="Database Parameters",
+            version="1.0.0",
+            openapi_version="3.0.0",
+            plugins=[ma_plugin],
+        )
+
+        ma_plugin.init_spec(spec)
+        ma_plugin.converter.add_attribute_function(encrypted_field_properties)
+        spec.components.schema(cls.__name__, schema=cls.parameters_schema)
+        return spec.to_dict()["components"]["schemas"][cls.__name__]
+
+    @classmethod
+    def select_star(  # pylint: disable=too-many-arguments
+        cls,
+        database: "Database",
+        table_name: str,
+        engine: Engine,
+        schema: Optional[str] = None,
+        limit: int = 100,
+        show_cols: bool = False,
+        indent: bool = True,
+        latest_partition: bool = True,
+        cols: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """
+        Remove array structures from `SELECT *`.
+
+        BigQuery supports structures and arrays of structures, eg:
+
+            author STRUCT<name STRING, email STRING>
+            trailer ARRAY<STRUCT<key STRING, value STRING>>
+
+        When loading metadata for a table each key in the struct is displayed as a
+        separate pseudo-column, eg:
+
+            - author
+            - author.name
+            - author.email
+            - trailer
+            - trailer.key
+            - trailer.value
+
+        When generating the `SELECT *` statement we want to remove any keys from
+        structs inside an array, since selecting them results in an error. The correct
+        select statement should look like this:
+
+            SELECT
+              `author`,
+              `author`.`name`,
+              `author`.`email`,
+              `trailer`
+            FROM
+              table
+
+        Selecting `trailer.key` or `trailer.value` results in an error, as opposed to
+        selecting `author.name`, since they are keys in a structure inside an array.
+
+        This method removes any array pseudo-columns.
+        """
+        if cols:
+            # For arrays of structs, remove the child columns, otherwise the query
+            # will fail.
+            array_prefixes = {
+                col["name"] for col in cols if isinstance(col["type"], sqltypes.ARRAY)
+            }
+            cols = [
+                col
+                for col in cols
+                if "." not in col["name"]
+                or col["name"].split(".")[0] not in array_prefixes
+            ]
+
+        return super().select_star(
+            database,
+            table_name,
+            engine,
+            schema,
+            limit,
+            show_cols,
+            indent,
+            latest_partition,
+            cols,
+        )
+
+    @classmethod
+    def _get_fields(cls, cols: List[Dict[str, Any]]) -> List[Any]:
+        """
+        Label columns using their fully qualified name.
+
+        BigQuery supports columns of type `struct`, which are basically dictionaries.
+        When loading metadata for a table with struct columns, each key in the struct
+        is displayed as a separate pseudo-column, eg:
+
+            author STRUCT<name STRING, email STRING>
+
+        Will be shown as 3 columns:
+
+            - author
+            - author.name
+            - author.email
+
+        If we select those fields:
+
+            SELECT `author`, `author`.`name`, `author`.`email` FROM table
+
+        The resulting columns will be called "author", "name", and "email", This may
+        result in a clash with other columns. To prevent that, we explicitly label
+        the columns using their fully qualified name, so we end up with "author",
+        "author__name" and "author__email", respectively.
+        """
+        return [column(c["name"]).label(c["name"].replace(".", "__")) for c in cols]
+
+    @classmethod
+    def parse_error_exception(cls, exception: Exception) -> Exception:
+        try:
+            return Exception(str(exception).splitlines()[0].rsplit(":")[1].strip())
+        except Exception:  # pylint: disable=broad-except
+            # If for some reason we get an exception, for example, no new line
+            # We will return the original exception
+            return exception

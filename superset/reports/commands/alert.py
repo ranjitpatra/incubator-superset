@@ -17,6 +17,7 @@
 import json
 import logging
 from operator import eq, ge, gt, le, lt, ne
+from timeit import default_timer
 from typing import Optional
 
 import numpy as np
@@ -24,9 +25,8 @@ import pandas as pd
 from celery.exceptions import SoftTimeLimitExceeded
 from flask_babel import lazy_gettext as _
 
-from superset import jinja_context
+from superset import app, jinja_context
 from superset.commands.base import BaseCommand
-from superset.models.reports import ReportSchedule, ReportScheduleValidatorType
 from superset.reports.commands.exceptions import (
     AlertQueryError,
     AlertQueryInvalidTypeError,
@@ -35,6 +35,10 @@ from superset.reports.commands.exceptions import (
     AlertQueryTimeout,
     AlertValidatorConfigError,
 )
+from superset.reports.models import ReportSchedule, ReportScheduleValidatorType
+from superset.reports.utils import get_executor
+from superset.utils.core import override_user
+from superset.utils.retries import retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +80,9 @@ class AlertCommand(BaseCommand):
             threshold = json.loads(self._report_schedule.validator_config_json)[
                 "threshold"
             ]
-
-            return OPERATOR_FUNCTIONS[operator](self._result, threshold)
-        except (KeyError, json.JSONDecodeError):
-            raise AlertValidatorConfigError()
+            return OPERATOR_FUNCTIONS[operator](self._result, threshold)  # type: ignore
+        except (KeyError, json.JSONDecodeError) as ex:
+            raise AlertValidatorConfigError() from ex
 
     def _validate_not_null(self, rows: np.recarray) -> None:
         self._validate_result(rows)
@@ -87,20 +90,20 @@ class AlertCommand(BaseCommand):
 
     @staticmethod
     def _validate_result(rows: np.recarray) -> None:
-        # check if query return more then one row
+        # check if query return more than one row
         if len(rows) > 1:
             raise AlertQueryMultipleRowsError(
                 message=_(
-                    "Alert query returned more then one row. %s rows returned"
+                    "Alert query returned more than one row. %s rows returned"
                     % len(rows),
                 )
             )
-        # check if query returned more then one column
+        # check if query returned more than one column
         if len(rows[0]) > 2:
             raise AlertQueryMultipleColumnsError(
                 # len is subtracted by 1 to discard pandas index column
                 _(
-                    "Alert query returned more then one column. %s columns returned"
+                    "Alert query returned more than one column. %s columns returned"
                     % (len(rows[0]) - 1)
                 )
             )
@@ -114,8 +117,8 @@ class AlertCommand(BaseCommand):
             # Check if it's float or if we can convert it
             self._result = float(rows[0][1])
             return
-        except (AssertionError, TypeError, ValueError):
-            raise AlertQueryInvalidTypeError()
+        except (AssertionError, TypeError, ValueError) as ex:
+            raise AlertQueryInvalidTypeError() from ex
 
     @property
     def _is_validator_not_null(self) -> bool:
@@ -145,17 +148,35 @@ class AlertCommand(BaseCommand):
             limited_rendered_sql = self._report_schedule.database.apply_limit_to_sql(
                 rendered_sql, ALERT_SQL_LIMIT
             )
-            return self._report_schedule.database.get_df(limited_rendered_sql)
-        except SoftTimeLimitExceeded:
-            raise AlertQueryTimeout()
+
+            user = get_executor(self._report_schedule)
+            with override_user(user):
+                start = default_timer()
+                df = self._report_schedule.database.get_df(sql=limited_rendered_sql)
+                stop = default_timer()
+                logger.info(
+                    "Query for %s took %.2f ms",
+                    self._report_schedule.name,
+                    (stop - start) * 1000.0,
+                )
+                return df
+        except SoftTimeLimitExceeded as ex:
+            logger.warning("A timeout occurred while executing the alert query: %s", ex)
+            raise AlertQueryTimeout() from ex
         except Exception as ex:
-            raise AlertQueryError(message=str(ex))
+            raise AlertQueryError(message=str(ex)) from ex
 
     def validate(self) -> None:
         """
         Validate the query result as a Pandas DataFrame
         """
-        df = self._execute_query()
+        # When there are transient errors when executing queries, users will get
+        # notified with the error stacktrace which can be avoided by retrying
+        df = retry_call(
+            self._execute_query,
+            exception=AlertQueryError,
+            max_tries=app.config["ALERT_REPORTS_QUERY_EXECUTION_MAX_TRIES"],
+        )
 
         if df.empty and self._is_validator_not_null:
             self._result = None

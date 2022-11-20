@@ -17,12 +17,13 @@
  * under the License.
  */
 import React, { CSSProperties } from 'react';
-import { Tag } from 'src/common/components';
+import { Tag } from 'src/components';
 import { useTheme } from '@superset-ui/core';
 
 export type OnClickHandler = React.MouseEventHandler<HTMLElement>;
 
 export type Type =
+  | 'alert'
   | 'success'
   | 'warning'
   | 'danger'
@@ -44,8 +45,9 @@ export interface LabelProps extends React.HTMLAttributes<HTMLSpanElement> {
 export default function Label(props: LabelProps) {
   const theme = useTheme();
   const { colors, transitionTiming } = theme;
-  const { type, onClick, children, ...rest } = props;
+  const { type = 'default', onClick, children, ...rest } = props;
   const {
+    alert,
     primary,
     secondary,
     grayscale,
@@ -61,11 +63,14 @@ export default function Label(props: LabelProps) {
   let borderColorHover = onClick ? primary.light1 : 'transparent';
   let color = grayscale.dark1;
 
-  if (type && type !== 'default') {
+  if (type !== 'default') {
     color = grayscale.light4;
 
     let baseColor;
-    if (type === 'success') {
+    if (type === 'alert') {
+      color = grayscale.dark1;
+      baseColor = alert;
+    } else if (type === 'success') {
       baseColor = success;
     } else if (type === 'warning') {
       baseColor = warning;
@@ -87,6 +92,8 @@ export default function Label(props: LabelProps) {
 
   return (
     <Tag
+      onClick={onClick}
+      {...rest}
       css={{
         transition: `background-color ${transitionTiming}s`,
         whiteSpace: 'nowrap',
@@ -99,14 +106,13 @@ export default function Label(props: LabelProps) {
         padding: '0.35em 0.8em',
         lineHeight: 1,
         color,
+        maxWidth: '100%',
         '&:hover': {
           backgroundColor: backgroundColorHover,
           borderColor: borderColorHover,
           opacity: 1,
         },
       }}
-      onClick={onClick}
-      {...rest}
     >
       {children}
     </Tag>

@@ -15,14 +15,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from superset.models.reports import ReportRecipients
+from superset.reports.models import ReportRecipients
 from superset.reports.notifications.base import BaseNotification, NotificationContent
 from superset.reports.notifications.email import EmailNotification
 from superset.reports.notifications.slack import SlackNotification
 
 
 def create_notification(
-    recipient: ReportRecipients, screenshot_data: NotificationContent
+    recipient: ReportRecipients, notification_content: NotificationContent
 ) -> BaseNotification:
     """
     Notification polymorphic factory
@@ -30,5 +30,5 @@ def create_notification(
     """
     for plugin in BaseNotification.plugins:
         if plugin.type == recipient.type:
-            return plugin(recipient, screenshot_data)
+            return plugin(recipient, notification_content)
     raise Exception("Recipient type not supported")

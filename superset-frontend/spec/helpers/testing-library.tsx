@@ -20,37 +20,80 @@ import '@testing-library/jest-dom/extend-expect';
 import React, { ReactNode, ReactElement } from 'react';
 import { render, RenderOptions } from '@testing-library/react';
 import { ThemeProvider, supersetTheme } from '@superset-ui/core';
+import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
-import { combineReducers, createStore, applyMiddleware, compose } from 'redux';
+import {
+  combineReducers,
+  createStore,
+  applyMiddleware,
+  compose,
+  Store,
+} from 'redux';
 import thunk from 'redux-thunk';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import reducerIndex from 'spec/helpers/reducerIndex';
+import { QueryParamProvider } from 'use-query-params';
+import QueryProvider from 'src/views/QueryProvider';
 
 type Options = Omit<RenderOptions, 'queries'> & {
   useRedux?: boolean;
+  useDnd?: boolean;
+  useQueryParams?: boolean;
+  useRouter?: boolean;
+  useQuery?: boolean;
   initialState?: {};
   reducers?: {};
+  store?: Store;
 };
 
-function createWrapper(options?: Options) {
-  const { useRedux, initialState, reducers } = options || {};
+export function createWrapper(options?: Options) {
+  const {
+    useDnd,
+    useRedux,
+    useQueryParams,
+    useQuery = true,
+    useRouter,
+    initialState,
+    reducers,
+    store,
+  } = options || {};
 
-  if (useRedux) {
-    const store = createStore(
-      combineReducers(reducers || reducerIndex),
-      initialState || {},
-      compose(applyMiddleware(thunk)),
+  return ({ children }: { children?: ReactNode }) => {
+    let result = (
+      <ThemeProvider theme={supersetTheme}>{children}</ThemeProvider>
     );
 
-    return ({ children }: { children?: ReactNode }) => (
-      <Provider store={store}>
-        <ThemeProvider theme={supersetTheme}>{children}</ThemeProvider>
-      </Provider>
-    );
-  }
+    if (useDnd) {
+      result = <DndProvider backend={HTML5Backend}>{result}</DndProvider>;
+    }
 
-  return ({ children }: { children?: ReactNode }) => (
-    <ThemeProvider theme={supersetTheme}>{children}</ThemeProvider>
-  );
+    if (useRedux) {
+      const mockStore =
+        store ??
+        createStore(
+          combineReducers(reducers || reducerIndex),
+          initialState || {},
+          compose(applyMiddleware(thunk)),
+        );
+
+      result = <Provider store={mockStore}>{result}</Provider>;
+    }
+
+    if (useQueryParams) {
+      result = <QueryParamProvider>{result}</QueryParamProvider>;
+    }
+
+    if (useRouter) {
+      result = <BrowserRouter>{result}</BrowserRouter>;
+    }
+
+    if (useQuery) {
+      result = <QueryProvider>{result}</QueryProvider>;
+    }
+
+    return result;
+  };
 }
 
 const customRender = (ui: ReactElement, options?: Options) =>

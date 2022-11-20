@@ -18,6 +18,7 @@
  */
 
 import Owner from 'src/types/Owner';
+import { NOTIFICATION_FORMATS } from 'src/reports/types';
 
 type user = {
   id: number;
@@ -27,6 +28,7 @@ type user = {
 export type ChartObject = {
   id: number;
   slice_name: string;
+  viz_type: string;
 };
 
 export type DashboardObject = {
@@ -39,11 +41,13 @@ export type DatabaseObject = {
   id: number;
 };
 
+export type NotificationMethodOption = 'Email' | 'Slack';
+
 export type Recipient = {
   recipient_config_json: {
     target: string;
   };
-  type: string;
+  type: NotificationMethodOption;
 };
 
 export type MetaObject = {
@@ -56,15 +60,19 @@ export type Operator = '<' | '>' | '<=' | '>=' | '==' | '!=' | 'not null';
 
 export type AlertObject = {
   active?: boolean;
+  creation_method?: string;
   chart?: MetaObject;
   changed_by?: user;
   changed_on_delta_humanized?: string;
+  chart_id: number;
   created_by?: user;
   created_on?: string;
   crontab?: string;
   dashboard?: MetaObject;
+  dashboard_id?: number;
   database?: MetaObject;
   description?: string;
+  force_screenshot: boolean;
   grace_period?: number;
   id: number;
   last_eval_dttm?: number;
@@ -73,7 +81,9 @@ export type AlertObject = {
   name?: string;
   owners?: Array<Owner | MetaObject>;
   sql?: string;
+  timezone?: string;
   recipients?: Array<Recipient>;
+  report_format?: NOTIFICATION_FORMATS;
   type?: string;
   validator_config_json?: {
     op?: Operator;
@@ -81,6 +91,7 @@ export type AlertObject = {
   };
   validator_type?: string;
   working_timeout?: number;
+  error?: string;
 };
 
 export type LogObject = {
@@ -91,17 +102,18 @@ export type LogObject = {
   start_dttm: string;
   state: string;
   value: string;
+  uuid: string;
 };
 
 export enum AlertState {
-  success = 'Success',
-  working = 'Working',
-  error = 'Error',
-  noop = 'Not triggered',
-  grace = 'On Grace',
+  Success = 'Success',
+  Working = 'Working',
+  Error = 'Error',
+  Noop = 'Not triggered',
+  Grace = 'On Grace',
 }
 
 export enum RecipientIconName {
-  email = 'Email',
-  slack = 'Slack',
+  Email = 'Email',
+  Slack = 'Slack',
 }

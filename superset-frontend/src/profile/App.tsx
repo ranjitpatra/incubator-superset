@@ -22,15 +22,17 @@ import thunk from 'redux-thunk';
 import { createStore, applyMiddleware, compose, combineReducers } from 'redux';
 import { Provider } from 'react-redux';
 import { ThemeProvider } from '@superset-ui/core';
+import { GlobalStyles } from 'src/GlobalStyles';
 import App from 'src/profile/components/App';
-import messageToastReducer from 'src/messageToasts/reducers';
+import messageToastReducer from 'src/components/MessageToasts/reducers';
 import { initEnhancer } from 'src/reduxUtils';
 import setupApp from 'src/setup/setupApp';
-import './main.less';
+import setupExtensions from 'src/setup/setupExtensions';
 import { theme } from 'src/preamble';
-import ToastPresenter from 'src/messageToasts/containers/ToastPresenter';
+import ToastContainer from 'src/components/MessageToasts/ToastContainer';
 
 setupApp();
+setupExtensions();
 
 const profileViewContainer = document.getElementById('app');
 const bootstrap = JSON.parse(
@@ -48,8 +50,9 @@ const store = createStore(
 const Application = () => (
   <Provider store={store}>
     <ThemeProvider theme={theme}>
+      <GlobalStyles />
       <App user={bootstrap.user} />
-      <ToastPresenter />
+      <ToastContainer />
     </ThemeProvider>
   </Provider>
 );

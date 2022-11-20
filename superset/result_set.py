@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
-from superset import db_engine_specs
-from superset.typing import DbapiDescription, DbapiResult
+from superset.db_engine_specs import BaseEngineSpec
+from superset.superset_typing import DbapiDescription, DbapiResult, ResultSetColumnType
 from superset.utils import core as utils
 
 logger = logging.getLogger(__name__)
@@ -63,20 +63,38 @@ def stringify(obj: Any) -> str:
 
 
 def stringify_values(array: np.ndarray) -> np.ndarray:
-    vstringify = np.vectorize(stringify)
-    return vstringify(array)
+    result = np.copy(array)
+
+    with np.nditer(result, flags=["refs_ok"], op_flags=["readwrite"]) as it:
+        for obj in it:
+            obj[...] = stringify(obj)
+
+    return result
 
 
 def destringify(obj: str) -> Any:
     return json.loads(obj)
 
 
+def convert_to_string(value: Any) -> str:
+    """
+    Used to ensure column names from the cursor description are strings.
+    """
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+
+    return str(value)
+
+
 class SupersetResultSet:
-    def __init__(  # pylint: disable=too-many-locals,too-many-branches
+    def __init__(  # pylint: disable=too-many-locals
         self,
         data: DbapiResult,
         cursor_description: DbapiDescription,
-        db_engine_spec: Type[db_engine_specs.BaseEngineSpec],
+        db_engine_spec: Type[BaseEngineSpec],
     ):
         self.db_engine_spec = db_engine_spec
         data = data or []
@@ -88,7 +106,9 @@ class SupersetResultSet:
 
         if cursor_description:
             # get deduped list of column names
-            column_names = dedup([col[0] for col in cursor_description])
+            column_names = dedup(
+                [convert_to_string(col[0]) for col in cursor_description]
+            )
 
             # fix cursor descriptor with the deduped names
             deduped_cursor_desc = [
@@ -146,6 +166,9 @@ class SupersetResultSet:
                         except Exception as ex:  # pylint: disable=broad-except
                             logger.exception(ex)
 
+        if not pa_data:
+            column_names = []
+
         self.table = pa.Table.from_arrays(pa_data, names=column_names)
         self._type_dict: Dict[str, Any] = {}
         try:
@@ -174,16 +197,20 @@ class SupersetResultSet:
 
     @staticmethod
     def convert_table_to_df(table: pa.Table) -> pd.DataFrame:
-        return table.to_pandas(integer_object_nulls=True)
+        try:
+            return table.to_pandas(integer_object_nulls=True)
+        except pa.lib.ArrowInvalid:
+            return table.to_pandas(integer_object_nulls=True, timestamp_as_object=True)
 
     @staticmethod
     def first_nonempty(items: List[Any]) -> Any:
         return next((i for i in items if i), None)
 
     def is_temporal(self, db_type_str: Optional[str]) -> bool:
-        return self.db_engine_spec.is_db_column_type_match(
-            db_type_str, utils.GenericDataType.TEMPORAL
-        )
+        column_spec = self.db_engine_spec.get_column_spec(db_type_str)
+        if column_spec is None:
+            return False
+        return column_spec.is_dttm
 
     def data_type(self, col_name: str, pa_dtype: pa.DataType) -> Optional[str]:
         """Given a pyarrow data type, Returns a generic database type"""
@@ -209,17 +236,17 @@ class SupersetResultSet:
         return self.table.num_rows
 
     @property
-    def columns(self) -> List[Dict[str, Any]]:
+    def columns(self) -> List[ResultSetColumnType]:
         if not self.table.column_names:
             return []
 
         columns = []
         for col in self.table.schema:
             db_type_str = self.data_type(col.name, col.type)
-            column = {
+            column: ResultSetColumnType = {
                 "name": col.name,
                 "type": db_type_str,
-                "is_date": self.is_temporal(db_type_str),
+                "is_dttm": self.is_temporal(db_type_str),
             }
             columns.append(column)
 

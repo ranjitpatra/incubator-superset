@@ -17,8 +17,6 @@
 import logging
 from typing import List, Optional
 
-from flask_appbuilder.security.sqla.models import User
-
 from superset.commands.base import BaseCommand
 from superset.css_templates.commands.exceptions import (
     CssTemplateBulkDeleteFailedError,
@@ -32,8 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class BulkDeleteCssTemplateCommand(BaseCommand):
-    def __init__(self, user: User, model_ids: List[int]):
-        self._actor = user
+    def __init__(self, model_ids: List[int]):
         self._model_ids = model_ids
         self._models: Optional[List[CssTemplate]] = None
 
@@ -44,7 +41,7 @@ class BulkDeleteCssTemplateCommand(BaseCommand):
             return None
         except DAODeleteFailedError as ex:
             logger.exception(ex.exception)
-            raise CssTemplateBulkDeleteFailedError()
+            raise CssTemplateBulkDeleteFailedError() from ex
 
     def validate(self) -> None:
         # Validate/populate model exists

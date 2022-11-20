@@ -22,8 +22,8 @@ import { getChartControlPanelRegistry } from '@superset-ui/core';
 
 import AlteredSliceTag from 'src/components/AlteredSliceTag';
 import ModalTrigger from 'src/components/ModalTrigger';
-import { Tooltip } from 'src/common/components/Tooltip';
-import TableCollection from 'src/components/dataViewCommon/TableCollection';
+import { Tooltip } from 'src/components/Tooltip';
+import TableCollection from 'src/components/TableCollection';
 import TableView from 'src/components/TableView';
 
 import {
@@ -32,6 +32,8 @@ import {
   expectedRows,
   fakePluginControls,
 } from './AlteredSliceTagMocks';
+
+jest.mock('src/components/Icons/Icon', () => () => <span />);
 
 const getTableWrapperFromModalBody = modalBody =>
   modalBody.find(TableView).find(TableCollection);
@@ -62,6 +64,17 @@ describe('AlteredSliceTag', () => {
     props = {
       origFormData: props.origFormData,
       currentFormData: props.origFormData,
+    };
+    wrapper = mount(<AlteredSliceTag {...props} />);
+    expect(wrapper.instance().state.rows).toEqual([]);
+    expect(wrapper.instance().state.hasDiffs).toBe(false);
+    expect(wrapper.instance().render()).toBeNull();
+  });
+
+  it('does not run when temporary controls have changes', () => {
+    props = {
+      origFormData: { ...props.origFormData, url_params: { foo: 'foo' } },
+      currentFormData: { ...props.origFormData, url_params: { bar: 'bar' } },
     };
     wrapper = mount(<AlteredSliceTag {...props} />);
     expect(wrapper.instance().state.rows).toEqual([]);
@@ -128,8 +141,8 @@ describe('AlteredSliceTag', () => {
       );
       const th = getTableWrapperFromModalBody(modalBody).find('th');
       expect(th).toHaveLength(3);
-      ['Control', 'Before', 'After'].forEach((v, i) => {
-        expect(th.find('span').get(i).props.children[0]).toBe(v);
+      ['Control', 'Before', 'After'].forEach(async (v, i) => {
+        await expect(th.at(i).find('span').get(0).props.children[0]).toBe(v);
       });
     });
 
@@ -148,7 +161,7 @@ describe('AlteredSliceTag', () => {
       const td = getTableWrapperFromModalBody(modalBody).find('td');
       expect(td).toHaveLength(21);
       ['control', 'before', 'after'].forEach((v, i) => {
-        expect(td.find('Cell').get(0).props.columns[i].id).toBe(v);
+        expect(td.find('defaultRenderer').get(0).props.columns[i].id).toBe(v);
       });
     });
   });
@@ -215,6 +228,18 @@ describe('AlteredSliceTag', () => {
       const expected = '5, 6, 7, 8, hello, goodbye';
       expect(
         wrapper.instance().formatValue(value, undefined, controlsMap),
+      ).toBe(expected);
+    });
+
+    it('returns Metrics if the field type is metrics', () => {
+      const value = [
+        {
+          label: 'SUM(Sales)',
+        },
+      ];
+      const expected = 'SUM(Sales)';
+      expect(
+        wrapper.instance().formatValue(value, 'metrics', controlsMap),
       ).toBe(expected);
     });
 

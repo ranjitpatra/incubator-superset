@@ -24,6 +24,13 @@ import { supersetTheme } from '@superset-ui/core';
 import ErrorAlert from './ErrorAlert';
 import { ErrorLevel, ErrorSource } from './types';
 
+jest.mock(
+  'src/components/Icons/Icon',
+  () =>
+    ({ fileName }: { fileName: string }) =>
+      <span role="img" aria-label={fileName.replace('_', '-')} />,
+);
+
 const mockedProps = {
   body: 'Error body',
   level: 'warning' as ErrorLevel,
@@ -31,14 +38,8 @@ const mockedProps = {
   subtitle: 'Error subtitle',
   title: 'Error title',
   source: 'dashboard' as ErrorSource,
+  description: 'we are unable to connect db.',
 };
-
-jest.mock('../Icon', () => ({
-  __esModule: true,
-  default: ({ name }: { name: string }) => (
-    <div data-test="icon" data-name={name} />
-  ),
-}));
 
 test('should render', () => {
   const { container } = render(<ErrorAlert {...mockedProps} />);
@@ -47,11 +48,9 @@ test('should render', () => {
 
 test('should render warning icon', () => {
   render(<ErrorAlert {...mockedProps} />);
-  expect(screen.getByTestId('icon')).toBeInTheDocument();
-  expect(screen.getByTestId('icon')).toHaveAttribute(
-    'data-name',
-    'warning-solid',
-  );
+  expect(
+    screen.getByRole('img', { name: 'warning-solid' }),
+  ).toBeInTheDocument();
 });
 
 test('should render error icon', () => {
@@ -60,11 +59,7 @@ test('should render error icon', () => {
     level: 'error' as ErrorLevel,
   };
   render(<ErrorAlert {...errorProps} />);
-  expect(screen.getByTestId('icon')).toBeInTheDocument();
-  expect(screen.getByTestId('icon')).toHaveAttribute(
-    'data-name',
-    'error-solid',
-  );
+  expect(screen.getByRole('img', { name: 'error-solid' })).toBeInTheDocument();
 });
 
 test('should render the error title', () => {
@@ -74,6 +69,11 @@ test('should render the error title', () => {
   };
   render(<ErrorAlert {...titleProps} />);
   expect(screen.getByText('Error title')).toBeInTheDocument();
+});
+
+test('should render the error description', () => {
+  render(<ErrorAlert {...mockedProps} />, { useRedux: true });
+  expect(screen.getByText('we are unable to connect db.')).toBeInTheDocument();
 });
 
 test('should render the error subtitle', () => {

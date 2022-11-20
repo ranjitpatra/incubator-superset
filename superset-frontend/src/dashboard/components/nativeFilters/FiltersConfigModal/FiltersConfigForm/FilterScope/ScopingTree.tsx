@@ -18,50 +18,80 @@
  */
 
 import React, { FC, useMemo, useState } from 'react';
-import { FormInstance, Tree } from 'src/common/components';
+import { NativeFilterScope } from '@superset-ui/core';
+import { Tree } from 'src/components';
 import { DASHBOARD_ROOT_ID } from 'src/dashboard/util/constants';
+import { Tooltip } from 'src/components/Tooltip';
+import Icons from 'src/components/Icons';
 import { useFilterScopeTree } from './state';
-import { setFilterFieldValues, useForceUpdate } from '../utils';
 import { findFilterScope, getTreeCheckedItems } from './utils';
-import { NativeFiltersForm } from '../../types';
-import { Scope } from '../../../types';
 
 type ScopingTreeProps = {
-  form: FormInstance<NativeFiltersForm>;
-  filterId: string;
-  initialScope: Scope;
+  forceUpdate: Function;
+  updateFormValues: (values: any) => void;
+  formScope?: NativeFilterScope;
+  initialScope: NativeFilterScope;
+  chartId?: number;
+  initiallyExcludedCharts?: number[];
+};
+
+const buildTreeLeafTitle = (
+  label: string,
+  hasTooltip: boolean,
+  tooltipTitle?: string,
+) => {
+  let title = <span>{label}</span>;
+  if (hasTooltip) {
+    title = (
+      <>
+        {title}&nbsp;
+        <Tooltip title={tooltipTitle}>
+          <Icons.Info iconSize="m" />
+        </Tooltip>
+      </>
+    );
+  }
+  return title;
 };
 
 const ScopingTree: FC<ScopingTreeProps> = ({
-  form,
-  filterId,
+  formScope,
   initialScope,
+  forceUpdate,
+  updateFormValues,
+  chartId,
+  initiallyExcludedCharts = [],
 }) => {
   const [expandedKeys, setExpandedKeys] = useState<string[]>([
     DASHBOARD_ROOT_ID,
   ]);
 
-  const formFilter = form.getFieldValue('filters')[filterId];
-
-  const { treeData, layout } = useFilterScopeTree();
+  const { treeData, layout } = useFilterScopeTree(
+    chartId,
+    initiallyExcludedCharts,
+    buildTreeLeafTitle,
+  );
   const [autoExpandParent, setAutoExpandParent] = useState<boolean>(true);
 
   const handleExpand = (expandedKeys: string[]) => {
     setExpandedKeys(expandedKeys);
     setAutoExpandParent(false);
   };
-  const forceUpdate = useForceUpdate();
+
   const handleCheck = (checkedKeys: string[]) => {
     forceUpdate();
-    setFilterFieldValues(form, filterId, {
-      scope: findFilterScope(checkedKeys, layout),
+    const scope = findFilterScope(checkedKeys, layout);
+    if (chartId !== undefined) {
+      scope.excluded = [...new Set([...scope.excluded, chartId])];
+    }
+    updateFormValues({
+      scope,
     });
   };
 
   const checkedKeys = useMemo(
-    () =>
-      getTreeCheckedItems({ ...(formFilter.scope || initialScope) }, layout),
-    [formFilter.scope, initialScope, layout],
+    () => getTreeCheckedItems({ ...(formScope || initialScope) }, layout),
+    [formScope, initialScope, layout],
   );
 
   return (

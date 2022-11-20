@@ -16,33 +16,53 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import React, { ReactNode, useMemo } from 'react';
 import { useDrop } from 'react-dnd';
-import { isEmpty } from 'lodash';
 import { t, useTheme } from '@superset-ui/core';
 import ControlHeader from 'src/explore/components/ControlHeader';
 import {
   AddControlLabel,
   DndLabelsContainer,
   HeaderContainer,
-} from 'src/explore/components/OptionControls';
-import { DatasourcePanelDndItem } from 'src/explore/components/DatasourcePanel/types';
-import Icon from 'src/components/Icon';
-import { DndColumnSelectProps } from './types';
+} from 'src/explore/components/controls/OptionControls';
+import {
+  DatasourcePanelDndItem,
+  DndItemValue,
+} from 'src/explore/components/DatasourcePanel/types';
+import Icons from 'src/components/Icons';
+import { DndItemType } from '../../DndItemType';
 
-export default function DndSelectLabel<T, O>(
-  props: DndColumnSelectProps<T, O>,
-) {
+export type DndSelectLabelProps = {
+  name: string;
+  accept: DndItemType | DndItemType[];
+  ghostButtonText?: string;
+  onDrop: (item: DatasourcePanelDndItem) => void;
+  canDrop: (item: DatasourcePanelDndItem) => boolean;
+  canDropValue?: (value: DndItemValue) => boolean;
+  onDropValue?: (value: DndItemValue) => void;
+  valuesRenderer: () => ReactNode;
+  displayGhostButton?: boolean;
+  onClickGhostButton?: () => void;
+};
+
+export default function DndSelectLabel({
+  displayGhostButton = true,
+  accept,
+  valuesRenderer,
+  ...props
+}: DndSelectLabelProps) {
   const theme = useTheme();
 
   const [{ isOver, canDrop }, datasourcePanelDrop] = useDrop({
-    accept: props.accept,
+    accept,
 
     drop: (item: DatasourcePanelDndItem) => {
       props.onDrop(item);
+      props.onDropValue?.(item.value);
     },
 
-    canDrop: (item: DatasourcePanelDndItem) => props.canDrop(item),
+    canDrop: (item: DatasourcePanelDndItem) =>
+      props.canDrop(item) && (props.canDropValue?.(item.value) ?? true),
 
     collect: monitor => ({
       isOver: monitor.isOver(),
@@ -51,11 +71,16 @@ export default function DndSelectLabel<T, O>(
     }),
   });
 
-  function renderPlaceHolder() {
+  const values = useMemo(() => valuesRenderer(), [valuesRenderer]);
+
+  function renderGhostButton() {
     return (
-      <AddControlLabel cancelHover>
-        <Icon name="plus-small" color={theme.colors.grayscale.light1} />
-        {t('Drop Columns')}
+      <AddControlLabel
+        cancelHover={!props.onClickGhostButton}
+        onClick={props.onClickGhostButton}
+      >
+        <Icons.PlusSmall iconColor={theme.colors.grayscale.light1} />
+        {t(props.ghostButtonText || 'Drop columns here')}
       </AddControlLabel>
     );
   }
@@ -65,8 +90,13 @@ export default function DndSelectLabel<T, O>(
       <HeaderContainer>
         <ControlHeader {...props} />
       </HeaderContainer>
-      <DndLabelsContainer canDrop={canDrop} isOver={isOver}>
-        {isEmpty(props.values) ? renderPlaceHolder() : props.valuesRenderer()}
+      <DndLabelsContainer
+        data-test="dnd-labels-container"
+        canDrop={canDrop}
+        isOver={isOver}
+      >
+        {values}
+        {displayGhostButton && renderGhostButton()}
       </DndLabelsContainer>
     </div>
   );

@@ -17,13 +17,12 @@
  * under the License.
  */
 import React from 'react';
-import { t } from '@superset-ui/core';
-import {
-  handleDashboardDelete,
-  handleBulkDashboardExport,
-  CardStyles,
-} from 'src/views/CRUD/utils';
-import { Dropdown, Menu } from 'src/common/components';
+import { Link, useHistory } from 'react-router-dom';
+import { t, useTheme } from '@superset-ui/core';
+import { handleDashboardDelete, CardStyles } from 'src/views/CRUD/utils';
+import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
+import { AntdDropdown } from 'src/components';
+import { Menu } from 'src/components/Menu';
 import ConfirmStatusChange from 'src/components/ConfirmStatusChange';
 import ListViewCard from 'src/components/ListViewCard';
 import Icons from 'src/components/Icons';
@@ -45,7 +44,9 @@ interface DashboardCardProps {
   saveFavoriteStatus: (id: number, isStarred: boolean) => void;
   favoriteStatus: boolean;
   dashboardFilter?: string;
-  userId?: number;
+  userId?: string | number;
+  showThumbnails?: boolean;
+  handleBulkDashboardExport: (dashboardsToExport: Dashboard[]) => void;
 }
 
 function DashboardCard({
@@ -60,11 +61,15 @@ function DashboardCard({
   openDashboardEditModal,
   favoriteStatus,
   saveFavoriteStatus,
+  showThumbnails,
+  handleBulkDashboardExport,
 }: DashboardCardProps) {
+  const history = useHistory();
   const canEdit = hasPerm('can_write');
   const canDelete = hasPerm('can_write');
-  const canExport = hasPerm('can_read');
+  const canExport = hasPerm('can_export');
 
+  const theme = useTheme();
   const menu = (
     <Menu>
       {canEdit && openDashboardEditModal && (
@@ -73,9 +78,7 @@ function DashboardCard({
             role="button"
             tabIndex={0}
             className="action-button"
-            onClick={() =>
-              openDashboardEditModal && openDashboardEditModal(dashboard)
-            }
+            onClick={() => openDashboardEditModal?.(dashboard)}
             data-test="dashboard-card-option-edit-button"
           >
             <Icons.EditAlt iconSize="l" data-test="edit-alt" /> {t('Edit')}
@@ -136,23 +139,28 @@ function DashboardCard({
     <CardStyles
       onClick={() => {
         if (!bulkSelectEnabled) {
-          window.location.href = dashboard.url;
+          history.push(dashboard.url);
         }
       }}
     >
       <ListViewCard
         loading={dashboard.loading || false}
         title={dashboard.dashboard_title}
+        certifiedBy={dashboard.certified_by}
+        certificationDetails={dashboard.certification_details}
         titleRight={
           <Label>{dashboard.published ? t('published') : t('draft')}</Label>
         }
+        cover={
+          !isFeatureEnabled(FeatureFlag.THUMBNAILS) || !showThumbnails ? (
+            <></>
+          ) : null
+        }
         url={bulkSelectEnabled ? undefined : dashboard.url}
+        linkComponent={Link}
         imgURL={dashboard.thumbnail_url}
         imgFallbackURL="/static/assets/images/dashboard-card-fallback.svg"
-        description={t(
-          'Last modified %s',
-          dashboard.changed_on_delta_humanized,
-        )}
+        description={t('Modified %s', dashboard.changed_on_delta_humanized)}
         coverLeft={<FacePile users={dashboard.owners || []} />}
         actions={
           <ListViewCard.Actions
@@ -161,14 +169,16 @@ function DashboardCard({
               e.preventDefault();
             }}
           >
-            <FaveStar
-              itemId={dashboard.id}
-              saveFaveStar={saveFavoriteStatus}
-              isStarred={favoriteStatus}
-            />
-            <Dropdown overlay={menu}>
-              <Icons.MoreHoriz />
-            </Dropdown>
+            {userId && (
+              <FaveStar
+                itemId={dashboard.id}
+                saveFaveStar={saveFavoriteStatus}
+                isStarred={favoriteStatus}
+              />
+            )}
+            <AntdDropdown overlay={menu}>
+              <Icons.MoreVert iconColor={theme.colors.grayscale.base} />
+            </AntdDropdown>
           </ListViewCard.Actions>
         }
       />

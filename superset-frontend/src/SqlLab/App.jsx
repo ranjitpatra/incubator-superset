@@ -22,11 +22,14 @@ import { Provider } from 'react-redux';
 import thunkMiddleware from 'redux-thunk';
 import { hot } from 'react-hot-loader/root';
 import { ThemeProvider } from '@superset-ui/core';
+import { GlobalStyles } from 'src/GlobalStyles';
+import QueryProvider from 'src/views/QueryProvider';
 import {
   initFeatureFlags,
   isFeatureEnabled,
   FeatureFlag,
 } from 'src/featureFlags';
+import setupExtensions from 'src/setup/setupExtensions';
 import getInitialState from './reducers/getInitialState';
 import rootReducer from './reducers/index';
 import { initEnhancer } from '../reduxUtils';
@@ -39,11 +42,11 @@ import { BYTES_PER_CHAR, KB_STORAGE } from './constants';
 import setupApp from '../setup/setupApp';
 
 import './main.less';
-import '../../stylesheets/reactable-pagination.less';
-import '../components/FilterableTable/FilterableTableStyles.less';
+import '../assets/stylesheets/reactable-pagination.less';
 import { theme } from '../preamble';
 
 setupApp();
+setupExtensions();
 
 const appContainer = document.getElementById('app');
 const bootstrapData = JSON.parse(appContainer.getAttribute('data-bootstrap'));
@@ -67,9 +70,18 @@ const sqlLabPersistStateConfig = {
             ...state[path],
             queries: emptyQueryResults(state[path].queries),
             queryEditors: clearQueryEditors(state[path].queryEditors),
+            unsavedQueryEditor: clearQueryEditors([
+              state[path].unsavedQueryEditor,
+            ])[0],
           };
         }
       });
+
+      if (subset.sqlLab?.user) {
+        // Don't persist the user.
+        // User should really not be stored under the "sqlLab" field. Oh well.
+        delete subset.sqlLab.user;
+      }
 
       const data = JSON.stringify(subset);
       // 2 digit precision
@@ -80,6 +92,22 @@ const sqlLabPersistStateConfig = {
       }
 
       return subset;
+    },
+    merge: (initialState, persistedState = {}) => {
+      const result = {
+        ...initialState,
+        ...persistedState,
+        sqlLab: {
+          ...(persistedState?.sqlLab || {}),
+          // Overwrite initialState over persistedState for sqlLab
+          // since a logic in getInitialState overrides the value from persistedState
+          ...initialState.sqlLab,
+        },
+      };
+      // Filter out any user data that may have been persisted in an older version.
+      // Get user from bootstrap data instead, every time
+      result.sqlLab.user = initialState.sqlLab.user;
+      return result;
     },
   },
 };
@@ -109,11 +137,14 @@ if (sqlLabMenu) {
 }
 
 const Application = () => (
-  <Provider store={store}>
-    <ThemeProvider theme={theme}>
-      <App />
-    </ThemeProvider>
-  </Provider>
+  <QueryProvider>
+    <Provider store={store}>
+      <ThemeProvider theme={theme}>
+        <GlobalStyles />
+        <App />
+      </ThemeProvider>
+    </Provider>
+  </QueryProvider>
 );
 
 export default hot(Application);
