@@ -42,14 +42,14 @@ const mockStore = configureStore(middlewares);
 const store = mockStore(initialState);
 
 fetchMock.get('glob:*/api/v1/database/*/schemas/?*', { result: [] });
-fetchMock.get('glob:*/superset/tables/**', {
-  options: [
+fetchMock.get('glob:*/api/v1/database/*/tables/*', {
+  count: 1,
+  result: [
     {
       label: 'ab_user',
       value: 'ab_user',
     },
   ],
-  tableLength: 1,
 });
 
 const renderAndWait = (props, store) =>
@@ -110,8 +110,8 @@ test('should toggle the table when the header is clicked', async () => {
   userEvent.click(header);
 
   await waitFor(() => {
-    expect(store.getActions()).toHaveLength(2);
-    expect(store.getActions()[1].type).toEqual('COLLAPSE_TABLE');
+    expect(store.getActions()).toHaveLength(4);
+    expect(store.getActions()[3].type).toEqual('COLLAPSE_TABLE');
   });
 });
 

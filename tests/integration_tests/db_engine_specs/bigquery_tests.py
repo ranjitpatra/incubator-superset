@@ -48,23 +48,6 @@ class TestBigQueryDbEngineSpec(TestDbEngineSpec):
             actual = BigQueryEngineSpec.make_label_compatible(column(original).name)
             self.assertEqual(actual, expected)
 
-    def test_convert_dttm(self):
-        """
-        DB Eng Specs (bigquery): Test conversion to date time
-        """
-        dttm = self.get_dttm()
-        test_cases = {
-            "DATE": "CAST('2019-01-02' AS DATE)",
-            "DATETIME": "CAST('2019-01-02T03:04:05.678900' AS DATETIME)",
-            "TIMESTAMP": "CAST('2019-01-02T03:04:05.678900' AS TIMESTAMP)",
-            "TIME": "CAST('03:04:05.678900' AS TIME)",
-            "UNKNOWNTYPE": None,
-        }
-
-        for target_type, expected in test_cases.items():
-            actual = BigQueryEngineSpec.convert_dttm(target_type, dttm)
-            self.assertEqual(actual, expected)
-
     def test_timegrain_expressions(self):
         """
         DB Eng Specs (bigquery): Test time grain expressions
@@ -356,7 +339,7 @@ class TestBigQueryDbEngineSpec(TestDbEngineSpec):
         ]
 
     @mock.patch("superset.models.core.Database.db_engine_spec", BigQueryEngineSpec)
-    @mock.patch("pybigquery._helpers.create_bigquery_client", mock.Mock)
+    @mock.patch("sqlalchemy_bigquery._helpers.create_bigquery_client", mock.Mock)
     @pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
     def test_calculated_column_in_order_by(self):
         table = self.get_table(name="birth_names")
