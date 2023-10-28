@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -17,10 +16,12 @@
 # under the License.
 import json
 import logging
+from collections.abc import Sequence
 from io import IOBase
-from typing import Sequence, Union
+from typing import Union
 
 import backoff
+import pandas as pd
 from flask_babel import gettext as __
 from slack_sdk import WebClient
 from slack_sdk.errors import (
@@ -44,7 +45,6 @@ from superset.reports.notifications.exceptions import (
     NotificationUnprocessableException,
 )
 from superset.utils.decorators import statsd_gauge
-from superset.utils.urls import modify_url_query
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +63,6 @@ class SlackNotification(BaseNotification):  # pylint: disable=too-few-public-met
         return json.loads(self._recipient.recipient_config_json)["target"]
 
     def _message_template(self, table: str = "") -> str:
-        url = (
-            modify_url_query(self._content.url, standalone="0")
-            if self._content.url is not None
-            else ""
-        )
         return __(
             """*%(name)s*
 
@@ -79,7 +74,7 @@ class SlackNotification(BaseNotification):  # pylint: disable=too-few-public-met
 """,
             name=self._content.name,
             description=self._content.description or "",
-            url=url,
+            url=self._content.url,
             table=table,
         )
 
@@ -127,8 +122,9 @@ Error: %(text)s
         # need to truncate the data
         for i in range(len(df) - 1):
             truncated_df = df[: i + 1].fillna("")
-            truncated_df = truncated_df.append(
-                {k: "..." for k in df.columns}, ignore_index=True
+            truncated_row = pd.Series({k: "..." for k in df.columns})
+            truncated_df = pd.concat(
+                [truncated_df, truncated_row.to_frame().T], ignore_index=True
             )
             tabulated = df.to_markdown()
             table = f"```\n{tabulated}\n```\n\n(table was truncated)"
@@ -136,8 +132,9 @@ Error: %(text)s
             if len(message) > MAXIMUM_MESSAGE_SIZE:
                 # Decrement i and build a message that is under the limit
                 truncated_df = df[:i].fillna("")
-                truncated_df = truncated_df.append(
-                    {k: "..." for k in df.columns}, ignore_index=True
+                truncated_row = pd.Series({k: "..." for k in df.columns})
+                truncated_df = pd.concat(
+                    [truncated_df, truncated_row.to_frame().T], ignore_index=True
                 )
                 tabulated = df.to_markdown()
                 table = (

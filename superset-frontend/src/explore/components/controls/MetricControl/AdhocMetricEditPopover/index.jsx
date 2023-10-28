@@ -62,6 +62,7 @@ const propTypes = {
   savedMetric: savedMetricType,
   datasource: PropTypes.object,
   isNewMetric: PropTypes.bool,
+  isLabelModified: PropTypes.bool,
 };
 
 const defaultProps = {
@@ -247,7 +248,7 @@ export default class AdhocMetricEditPopover extends React.PureComponent {
         POPOVER_INITIAL_WIDTH,
       ),
       height: Math.max(
-        this.dragStartHeight + (e.clientY - this.dragStartY) * 2,
+        this.dragStartHeight + (e.clientY - this.dragStartY),
         POPOVER_INITIAL_HEIGHT,
       ),
     });
@@ -299,6 +300,7 @@ export default class AdhocMetricEditPopover extends React.PureComponent {
       onResize,
       datasource,
       isNewMetric,
+      isLabelModified,
       ...popoverProps
     } = this.props;
     const { adhocMetric, savedMetric } = this.state;
@@ -345,6 +347,7 @@ export default class AdhocMetricEditPopover extends React.PureComponent {
 
     const stateIsValid = adhocMetric.isValid() || savedMetric?.metric_name;
     const hasUnsavedChanges =
+      isLabelModified ||
       isNewMetric ||
       !adhocMetric.equals(propsAdhocMetric) ||
       (!(

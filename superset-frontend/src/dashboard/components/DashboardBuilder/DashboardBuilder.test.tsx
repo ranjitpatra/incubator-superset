@@ -16,12 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Store } from 'redux';
 import React from 'react';
 import fetchMock from 'fetch-mock';
 import { render } from 'spec/helpers/testing-library';
 import { fireEvent, within } from '@testing-library/react';
-import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
+import * as uiCore from '@superset-ui/core';
 import DashboardBuilder from 'src/dashboard/components/DashboardBuilder/DashboardBuilder';
 import useStoredSidebarWidth from 'src/components/ResizableSidebar/useStoredSidebarWidth';
 import {
@@ -33,7 +32,7 @@ import {
   dashboardLayout as undoableDashboardLayout,
   dashboardLayoutWithTabs as undoableDashboardLayoutWithTabs,
 } from 'spec/fixtures/mockDashboardLayout';
-import { mockStoreWithTabs, storeWithState } from 'spec/fixtures/mockStore';
+import { storeWithState } from 'spec/fixtures/mockStore';
 import mockState from 'spec/fixtures/mockState';
 import { DASHBOARD_ROOT_ID } from 'src/dashboard/util/constants';
 
@@ -45,13 +44,9 @@ jest.mock('src/dashboard/actions/dashboardState', () => ({
   setActiveTabs: jest.fn(),
   setDirectPathToChild: jest.fn(),
 }));
-jest.mock('src/featureFlags');
 jest.mock('src/components/ResizableSidebar/useStoredSidebarWidth');
 
 // mock following dependant components to fix the prop warnings
-jest.mock('src/components/Icons/Icon', () => () => (
-  <div data-test="mock-icon" />
-));
 jest.mock('src/components/DeprecatedSelect/WindowedSelect', () => () => (
   <div data-test="mock-windowed-select" />
 ));
@@ -102,7 +97,6 @@ describe('DashboardBuilder', () => {
       100,
       jest.fn(),
     ]);
-    (isFeatureEnabled as jest.Mock).mockImplementation(() => false);
   });
 
   afterAll(() => {
@@ -111,7 +105,7 @@ describe('DashboardBuilder', () => {
     (useStoredSidebarWidth as jest.Mock).mockReset();
   });
 
-  function setup(overrideState = {}, overrideStore?: Store) {
+  function setup(overrideState = {}) {
     return render(<DashboardBuilder />, {
       useRedux: true,
       store: storeWithState({
@@ -144,10 +138,9 @@ describe('DashboardBuilder', () => {
   });
 
   it('should render a Sticky top-level Tabs if the dashboard has tabs', async () => {
-    const { findAllByTestId } = setup(
-      { dashboardLayout: undoableDashboardLayoutWithTabs },
-      mockStoreWithTabs,
-    );
+    const { findAllByTestId } = setup({
+      dashboardLayout: undoableDashboardLayoutWithTabs,
+    });
     const sticky = await findAllByTestId('nav-list');
 
     expect(sticky.length).toBe(1);
@@ -231,12 +224,9 @@ describe('DashboardBuilder', () => {
       type: 'type',
       arg0,
     }));
-    const { findByRole } = setup(
-      {
-        dashboardLayout: undoableDashboardLayoutWithTabs,
-      },
-      mockStoreWithTabs,
-    );
+    const { findByRole } = setup({
+      dashboardLayout: undoableDashboardLayoutWithTabs,
+    });
     const tabList = await findByRole('tablist');
     const tabs = within(tabList).getAllByRole('tab');
     expect(setDirectPathToChild).toHaveBeenCalledTimes(0);
@@ -264,13 +254,17 @@ describe('DashboardBuilder', () => {
   });
 
   describe('when nativeFiltersEnabled', () => {
-    beforeEach(() => {
-      (isFeatureEnabled as jest.Mock).mockImplementation(
-        flag => flag === FeatureFlag.DASHBOARD_NATIVE_FILTERS,
-      );
+    let isFeatureEnabledMock: jest.MockInstance<boolean, [string]>;
+    beforeAll(() => {
+      isFeatureEnabledMock = jest
+        .spyOn(uiCore, 'isFeatureEnabled')
+        .mockImplementation(
+          flag => flag === uiCore.FeatureFlag.DASHBOARD_NATIVE_FILTERS,
+        );
     });
-    afterEach(() => {
-      (isFeatureEnabled as jest.Mock).mockReset();
+
+    afterAll(() => {
+      isFeatureEnabledMock.mockRestore();
     });
 
     it('should set FilterBar width by useStoredSidebarWidth', () => {
@@ -284,7 +278,6 @@ describe('DashboardBuilder', () => {
         dashboardInfo: {
           ...mockState.dashboardInfo,
           dash_edit_perm: true,
-          metadata: { show_native_filters: true },
         },
       });
       const filterbar = getByTestId('dashboard-filters-panel');
