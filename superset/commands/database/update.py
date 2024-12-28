@@ -42,6 +42,7 @@ from superset.daos.database import DatabaseDAO
 from superset.daos.dataset import DatasetDAO
 from superset.databases.ssh_tunnel.models import SSHTunnel
 from superset.db_engine_specs.base import GenericDBException
+from superset.exceptions import OAuth2RedirectError
 from superset.models.core import Database
 from superset.utils.decorators import on_error, transaction
 
@@ -77,12 +78,47 @@ class UpdateDatabaseCommand(BaseCommand):
         # since they're name based
         original_database_name = self._model.database_name
 
+        # Depending on the changes to the OAuth2 configuration we may need to purge
+        # existing personal tokens.
+        self._handle_oauth2()
+
         database = DatabaseDAO.update(self._model, self._properties)
         database.set_sqlalchemy_uri(database.sqlalchemy_uri)
         ssh_tunnel = self._handle_ssh_tunnel(database)
-        self._refresh_catalogs(database, original_database_name, ssh_tunnel)
+        try:
+            self._refresh_catalogs(database, original_database_name, ssh_tunnel)
+        except OAuth2RedirectError:
+            pass
 
         return database
+
+    def _handle_oauth2(self) -> None:
+        """
+        Handle changes in OAuth2.
+        """
+        if not self._model:
+            return
+
+        current_config = self._model.get_oauth2_config()
+        if not current_config:
+            return
+
+        new_config = self._properties["encrypted_extra"].get("oauth2_client_info", {})
+
+        # Keys that require purging personal tokens because they probably are no longer
+        # valid. For example, if the scope has changed the existing tokens are still
+        # associated with the old scope. Similarly, if the endpoints changed the tokens
+        # are probably no longer valid.
+        keys = {
+            "id",
+            "scope",
+            "authorization_request_uri",
+            "token_request_uri",
+        }
+        for key in keys:
+            if current_config.get(key) != new_config.get(key):
+                self._model.purge_oauth2_tokens()
+                break
 
     def _handle_ssh_tunnel(self, database: Database) -> SSHTunnel | None:
         """
@@ -123,6 +159,9 @@ class UpdateDatabaseCommand(BaseCommand):
                 force=True,
                 ssh_tunnel=ssh_tunnel,
             )
+        except OAuth2RedirectError:
+            # raise OAuth2 exceptions as-is
+            raise
         except GenericDBException as ex:
             raise DatabaseConnectionFailedError() from ex
 
@@ -141,6 +180,9 @@ class UpdateDatabaseCommand(BaseCommand):
                 catalog=catalog,
                 ssh_tunnel=ssh_tunnel,
             )
+        except OAuth2RedirectError:
+            # raise OAuth2 exceptions as-is
+            raise
         except GenericDBException as ex:
             raise DatabaseConnectionFailedError() from ex
 

@@ -18,6 +18,7 @@
  */
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import { isEmpty, isEqual } from 'lodash';
+// TODO: @msyavuz - Replace with dayjs when migrating datpicker to antd5
 import moment, { Moment } from 'moment';
 import {
   parseDttmToDate,
@@ -34,7 +35,10 @@ import { useSelector } from 'react-redux';
 
 import ControlHeader from 'src/explore/components/ControlHeader';
 import { RootState } from 'src/views/store';
-import { DEFAULT_DATE_PATTERN } from '@superset-ui/chart-controls';
+import {
+  DEFAULT_DATE_PATTERN,
+  INVALID_DATE,
+} from '@superset-ui/chart-controls';
 
 export interface TimeOffsetControlsProps {
   label?: ReactNode;
@@ -68,6 +72,7 @@ export default function TimeOffsetControls({
     moment.Moment | undefined
   >(undefined);
   const [savedStartDate, setSavedStartDate] = useState<string | null>(null);
+  const [isDateSelected, setIsDateSelected] = useState<boolean>(true);
 
   const currentTimeRangeFilters = useSelector<RootState, BinaryAdhocFilter[]>(
     state =>
@@ -86,7 +91,12 @@ export default function TimeOffsetControls({
   useEffect(() => {
     if (savedStartDate !== currentStartDate) {
       setSavedStartDate(currentStartDate);
-      onChange(moment(currentStartDate).format(MOMENT_FORMAT));
+      if (currentStartDate !== INVALID_DATE) {
+        onChange(moment(currentStartDate).format(MOMENT_FORMAT));
+        setIsDateSelected(true);
+      } else {
+        setIsDateSelected(false);
+      }
     }
   }, [currentStartDate]);
 
@@ -165,8 +175,10 @@ export default function TimeOffsetControls({
         setFormatedDate(moment(parseDttmToDate(date)));
       }
     } else if (savedStartDate) {
-      setStartDate(savedStartDate);
-      setFormatedDate(moment(parseDttmToDate(savedStartDate)));
+      if (savedStartDate !== INVALID_DATE) {
+        setStartDate(savedStartDate);
+        setFormatedDate(moment(parseDttmToDate(savedStartDate)));
+      }
     }
   }, [previousCustomFilter, savedStartDate, customStartDateInFilter]);
 
@@ -180,6 +192,7 @@ export default function TimeOffsetControls({
         setStartDate(resetDate.toString());
         setFormatedDate(resetDate);
         onChange(moment.utc(resetDate).format(MOMENT_FORMAT));
+        setIsDateSelected(true);
       }
     }
     if (
@@ -191,6 +204,7 @@ export default function TimeOffsetControls({
       setStartDate(resetDate.toString());
       setFormatedDate(resetDate);
       onChange(moment.utc(resetDate).format(MOMENT_FORMAT));
+      setIsDateSelected(true);
     }
   }, [formatedFilterDate, formatedDate, customStartDateInFilter]);
 
@@ -218,7 +232,7 @@ export default function TimeOffsetControls({
         }
         disabledDate={disabledDate}
         defaultValue={moment(formatedDate)}
-        value={moment(formatedDate)}
+        value={isDateSelected ? moment(formatedDate) : null}
       />
     </div>
   ) : null;
